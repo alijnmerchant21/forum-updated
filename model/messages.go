@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,20 @@ import (
 
 type Messages struct {
 	db *DB
+}
+
+type Message struct {
+	Sender  string `json:"sender"`
+	Message string `json:"message"`
+}
+
+func UnmarshalMessage(tx []byte) (*Message, error) {
+	var msg Message
+	err := json.Unmarshal(tx, &msg)
+	if err != nil {
+		return nil, err
+	}
+	return &msg, nil
 }
 
 type MsgSendMessage struct {
