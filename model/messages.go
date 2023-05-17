@@ -135,3 +135,12 @@ func (m *Messages) Process(message interface{}) error {
 		return fmt.Errorf("message type %T not supported", message)
 	}
 }
+
+func (m *Messages) GetMessage(pubkey ed25519.PubKey) (*Message, error) {
+	var msg Message
+	err := m.db.GetByPubKey(pubkey, &msg)
+	if err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
