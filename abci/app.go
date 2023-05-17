@@ -2,10 +2,13 @@ package abci
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 
-	//"crypto/ed25519"
 	"forum/model"
+
+	"github.com/cometbft/cometbft/crypto/ed25519"
 
 	// "github.com/alijnmerchant21/forum-updated/model"
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -39,14 +42,40 @@ func NewForumApp(dbDir string) (*ForumApp, error) {
 	}, nil
 }
 
-// Info/Query Connection
 // Return application info
 func (ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseInfo, error) {
 	return &abci.ResponseInfo{}, nil
 }
 
-func (ForumApp) Query(_ context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
-	return &abci.ResponseQuery{}, nil
+// Query blockchain
+func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
+	var response abci.ResponseQuery
+	switch query.Path {
+	case "/messages/":
+		pubkeyBytes, err := base64.StdEncoding.DecodeString(string(query.Data))
+		if err != nil {
+			return nil, err
+		}
+
+		pubkey := ed25519.PubKey(pubkeyBytes)
+
+		messages, err := app.messages.GetMessage(pubkey)
+		if err != nil {
+			return nil, err
+		}
+
+		bytes, err := json.Marshal(messages)
+		if err != nil {
+			return nil, err
+		}
+
+		response.Value = bytes
+	default:
+		return nil, abci.ErrInvalidLengthTypes
+	}
+
+	return &response, nil
+
 }
 
 // Mempool Connection
@@ -115,3 +144,29 @@ func (ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote
 func (ForumApp) VerifyVoteExtension(_ context.Context, verifyvoteextension *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
 	return &abci.ResponseVerifyVoteExtension{}, nil
 }
+
+/*func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
+	// Parse the query string to get the public key
+	pubKey := query.Data
+
+	// Find the user by their public key
+	user, err := app.DB.FindUser(pubKey)
+	if err != nil {
+		return &abci.ResponseQuery{}, err
+	}
+
+	// Get the message index based on the user's number of messages
+	messageIndex := user.NumMessages - 1
+
+	// Get the message at the specified index from the Messages array
+	message, err := app.messages.GetMessage(messageIndex)
+	if err != nil {
+		return &abci.ResponseQuery{}, err
+	}
+
+	// Return the message in a ResponseQuery struct
+	response := &abci.ResponseQuery{
+		Value: []byte(message),
+	}
+	return response, nil
+}*/
