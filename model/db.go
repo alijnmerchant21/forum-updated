@@ -84,3 +84,11 @@ func (db *DB) FindUser(key ed25519.PubKey) (*User, error) {
 	}
 	return &user, nil
 }
+
+func (m *DB) GetByPubKey(pubkey ed25519.PubKey, msg *Message) error {
+	err := m.store.Get(pubkey.String(), msg)
+	if err != nil {
+		return err
+	}
+	return nil
+}
