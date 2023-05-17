@@ -144,29 +144,3 @@ func (ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote
 func (ForumApp) VerifyVoteExtension(_ context.Context, verifyvoteextension *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
 	return &abci.ResponseVerifyVoteExtension{}, nil
 }
-
-/*func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
-	// Parse the query string to get the public key
-	pubKey := query.Data
-
-	// Find the user by their public key
-	user, err := app.DB.FindUser(pubKey)
-	if err != nil {
-		return &abci.ResponseQuery{}, err
-	}
-
-	// Get the message index based on the user's number of messages
-	messageIndex := user.NumMessages - 1
-
-	// Get the message at the specified index from the Messages array
-	message, err := app.messages.GetMessage(messageIndex)
-	if err != nil {
-		return &abci.ResponseQuery{}, err
-	}
-
-	// Return the message in a ResponseQuery struct
-	response := &abci.ResponseQuery{
-		Value: []byte(message),
-	}
-	return response, nil
-}*/
