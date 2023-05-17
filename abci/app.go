@@ -51,6 +51,20 @@ func (ForumApp) Query(_ context.Context, query *abci.RequestQuery) (*abci.Respon
 
 // Mempool Connection
 // Validate a tx for the mempool
+func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
+	// Find the user by their public key
+	user, err := app.DB.FindUser(app.msgSendmessage.From)
+	if err != nil {
+		return &abci.ResponseCheckTx{}, err
+	}
+
+	// Check if the user is banned
+	if app.user.IsBanned() {
+		return &abci.ResponseCheckTx{}, fmt.Errorf("user with public key %s is banned", user.PubKey)
+	}
+
+	return &abci.ResponseCheckTx{}, nil
+}
 
 // Consensus Connection
 // Initialize blockchain w validators/other info from TendermintCore
@@ -100,19 +114,4 @@ func (ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote
 
 func (ForumApp) VerifyVoteExtension(_ context.Context, verifyvoteextension *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
 	return &abci.ResponseVerifyVoteExtension{}, nil
-}
-
-func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
-	// Find the user by their public key
-	user, err := app.DB.FindUser(app.msgSendmessage.From)
-	if err != nil {
-		return &abci.ResponseCheckTx{}, err
-	}
-
-	// Check if the user is banned
-	if app.user.IsBanned() {
-		return &abci.ResponseCheckTx{}, fmt.Errorf("user with public key %s is banned", user.PubKey)
-	}
-
-	return &abci.ResponseCheckTx{}, nil
 }
