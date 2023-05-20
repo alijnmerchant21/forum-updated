@@ -1,6 +1,8 @@
 package model
 
 import (
+	"bytes"
+	"compress/flate"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -143,4 +145,32 @@ func (m *Messages) GetMessage(pubkey ed25519.PubKey) (*Message, error) {
 		return nil, err
 	}
 	return &msg, nil
+}
+
+func (db *DB) AddMessage(msg *Message) error {
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %v", err)
+	}
+
+	// Compress the message data using flate
+	var buf bytes.Buffer
+	gz, err := flate.NewWriter(&buf, flate.BestCompression)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip writer: %v", err)
+	}
+	if _, err := gz.Write(msgBytes); err != nil {
+		return fmt.Errorf("failed to compress message: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("failed to close gzip writer: %v", err)
+	}
+
+	// Store the compressed message data in the database
+	key := msg.Sender
+	if err := db.store.Insert([]byte(key), buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to store message: %v", err)
+	}
+
+	return nil
 }
