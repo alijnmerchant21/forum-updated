@@ -92,3 +92,27 @@ func (m *DB) GetByPubKey(pubkey ed25519.PubKey, msg *Message) error {
 	}
 	return nil
 }
+
+func (db *DB) GetRawTxsByPubKeys(pubkeys []ed25519.PubKey) ([][]byte, error) {
+	rawTxs := make([][]byte, len(pubkeys))
+	for i, pubkey := range pubkeys {
+		var txBytes []byte
+		if err := db.store.Get(pubkey.String(), &txBytes); err != nil {
+			return nil, err
+		}
+
+		buf := bytes.NewBuffer(txBytes)
+		gz := flate.NewReader(buf)
+
+		defer gz.Close()
+
+		var rawTx bytes.Buffer
+		if _, err := rawTx.ReadFrom(gz); err != nil {
+			return nil, err
+		}
+
+		rawTxs[i] = rawTx.Bytes()
+	}
+
+	return rawTxs, nil
+}
