@@ -1,4 +1,4 @@
-package abci
+package forum
 
 import (
 	"context"
@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"forum/model"
+	//"forum/model"
 
+	"github.com/alijnmerchant21/forum-updated/model"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 
 	// "github.com/alijnmerchant21/forum-updated/model"
