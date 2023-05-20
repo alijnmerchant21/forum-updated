@@ -96,12 +96,58 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 }
 
 // Consensus Connection
-// Initialize blockchain w validators/other info from TendermintCore
+// Initialize blockchain w validators/other info from CometBFT
 func (ForumApp) InitChain(_ context.Context, initchain *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
 	return &abci.ResponseInitChain{}, nil
 }
 
-func (ForumApp) PrepareProposal(_ context.Context, prepareproposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
+func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
+	// Extract the public keys from the transaction data
+	var pubKeys []ed25519.PubKey
+	for _, txBytes := range proposal.Txs {
+		tx, err := model.UnmarshalMessage(txBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal transaction: %v", err)
+		}
+
+		// Extract the sender's public key from the message
+		var sendMsg model.MsgSendMessage
+		if err := json.Unmarshal([]byte(tx.Message), &sendMsg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal message: %v", err)
+		}
+
+		pubKeys = append(pubKeys, sendMsg.From)
+	}
+
+	// Retrieve the raw transaction data using GetRawTxsByPubKeys
+	rawTxs, err := app.DB.GetRawTxsByPubKeys(pubKeys)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get raw txs: %v", err)
+	}
+
+	for _, rawTx := range rawTxs {
+		tx, err := model.UnmarshalMessage(rawTx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal transaction: %v", err)
+		}
+
+		var sendMsg model.MsgSendMessage
+		if err := json.Unmarshal([]byte(tx.Message), &sendMsg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal message: %v", err)
+		}
+
+		// Check if the message contains any curse words
+		if model.IsCurseWord(sendMsg.Text) {
+			// Ban the user
+			err := app.messages.SetBan(app.msgSendmessage.From, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to ban user: %v", err)
+			}
+
+			return nil, fmt.Errorf("message contains curse words")
+		}
+	}
+
 	return &abci.ResponsePrepareProposal{}, nil
 }
 
@@ -115,7 +161,7 @@ func (ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.Res
 }
 
 // Deliver the decided block with its txs to the Application
-func (ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	return &abci.ResponseFinalizeBlock{}, nil
 }
 
