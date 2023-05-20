@@ -155,14 +155,24 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 	return &abci.ResponseProcessProposal{}, nil
 }
 
+// Deliver the decided block with its txs to the Application
+func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+	for _, txBytes := range finalizeblock.Txs {
+		tx, err := model.UnmarshalMessage(txBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal transaction: %v", err)
+		}
+
+		if err := app.DB.AddMessage(tx); err != nil {
+			return nil, fmt.Errorf("failed to add message to database: %v", err)
+		}
+	}
+	return &abci.ResponseFinalizeBlock{}, nil
+}
+
 // Commit the state and return the application Merkle root hash
 func (ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.ResponseCommit, error) {
 	return &abci.ResponseCommit{}, nil
-}
-
-// Deliver the decided block with its txs to the Application
-func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
-	return &abci.ResponseFinalizeBlock{}, nil
 }
 
 // State Sync Connection
