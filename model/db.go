@@ -116,3 +116,14 @@ func (db *DB) GetRawTxsByPubKeys(pubkeys []ed25519.PubKey) ([][]byte, error) {
 
 	return rawTxs, nil
 }
+
+func (db *DB) GetMessagesByPubKey(pubkey ed25519.PubKey) ([]*Message, error) {
+	// Query the database for messages with the given public key
+	var messages []*Message
+	err := db.store.Find(&messages, badgerhold.Where("PubKey").Eq(pubkey.String()))
+	if err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
