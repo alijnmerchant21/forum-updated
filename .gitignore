@@ -4,3 +4,14 @@ temp.md
 
 go.mod
 go.sum
+
+# run main
+
+forum-db.db
+forum-db
+forum-updated
+
+# debug files
+
+main-from-comet
+ main.go-working
