@@ -8,10 +8,9 @@ import (
 
 	//"forum/model"
 
-	"github.com/alijnmerchant21/forum-updated/model"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 
-	// "github.com/alijnmerchant21/forum-updated/model"
+	"github.com/alijnmerchant21/forum-updated/model"
 	abci "github.com/cometbft/cometbft/abci/types"
 )
 
@@ -153,7 +152,7 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 }
 
 func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-	return &abci.ResponseProcessProposal{}, nil
+	return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil
 }
 
 // Deliver the decided block with its txs to the Application
