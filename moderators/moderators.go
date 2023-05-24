@@ -3,7 +3,7 @@ package moderators
 import (
 	"bytes"
 
-	"github.com/interchainio/forum/model"
+	"github.com/alijnmerchant21/forum-updated/model"
 )
 
 type Set struct {
