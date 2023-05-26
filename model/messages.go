@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/cometbft/cometbft/crypto/ed25519"
@@ -19,14 +20,116 @@ type Message struct {
 	Message string `json:"message"`
 }
 
-func UnmarshalMessage(tx []byte) (*Message, error) {
+/*func UnmarshalMessage(tx []byte) (*Message, error) {
+	if len(tx) == 0 {
+		return nil, fmt.Errorf("tx failes")
+	}
 	var msg Message
 	err := json.Unmarshal(tx, &msg)
 	if err != nil {
 		return nil, err
 	}
 	return &msg, nil
+}*/
+
+func UnmarshalMessage(tx []byte) (*Message, error) {
+	// Log the transaction message
+	log.Printf("Unmarshaling transaction message: %v\n", string(tx))
+
+	if len(tx) == 0 {
+		return nil, fmt.Errorf("transaction message is empty")
+	}
+	var msg Message
+	err := json.Unmarshal(tx, &msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal transaction message: %v", err)
+	}
+	return &msg, nil
 }
+
+func ParseTransactionMessage(tx string) (*Message, error) {
+	// Split the transaction message string using the separator character $
+	txArray := strings.Split(tx, ",")
+
+	// Initialize a new Message struct to hold the extracted fields
+	msg := &Message{}
+
+	// Loop through each field in the transaction message
+	for _, item := range txArray {
+		// Trim leading and trailing whitespaces.
+		item = strings.TrimSpace(item)
+
+		// Split the field into a key-value pair using the equals character =
+		itemSplit := strings.Split(item, "=")
+		if len(itemSplit) != 2 {
+			//fmt.Printf("invalid transaction message field: %s\n", item)
+			return nil, fmt.Errorf("invalid transaction message field: %s", item)
+		}
+
+		// Extract the key and value from the key-value pair
+		key := itemSplit[0]
+		value := itemSplit[1]
+
+		// Assign the value to the appropriate field in the Message struct
+		switch key {
+		case "sender":
+			msg.Sender = key
+		case "message":
+			msg.Message = value
+		default:
+			///fmt.Printf("unknown transaction message field: %s\n", key)
+			return nil, fmt.Errorf("unknown transaction message field: %s", key)
+		}
+	}
+
+	// Return the parsed Message struct
+	return msg, nil
+}
+
+/*func ParseTransactionMessage(b []byte) (*Message, error) {
+	// Convert the byte slice to a string
+	tx := string(b)
+
+	// Split the transaction message string using the separator character $
+	txArray := strings.Split(tx, ",")
+
+	// Initialize a new Message struct to hold the extracted fields
+	msg := &Message{}
+
+	// Loop through each field in the transaction message
+	for _, item := range txArray {
+		// Trim leading and trailing whitespaces.
+		item = strings.TrimSpace(item)
+
+		// Split the field into a key-value pair using either the equals character = or the colon character :
+		var itemSplit []string
+		if strings.Contains(item, "=") {
+			itemSplit = strings.Split(item, "=")
+		} else if strings.Contains(item, ":") {
+			itemSplit = strings.Split(item, ":")
+		} else {
+			return nil, fmt.Errorf("invalid transaction message field: %s", item)
+		}
+
+		// Extract the key and value from the key-value pair
+		key := itemSplit[0]
+		value := itemSplit[1]
+
+		// Assign the value to the appropriate field in the Message struct
+		switch key {
+		case "sender":
+			msg.Sender = value
+		case "message":
+			msg.Message = value
+		default:
+			fmt.Printf("unknown transaction message field: %s\n", key)
+			return nil, fmt.Errorf("unknown transaction message field: %s", key)
+		}
+	}
+
+	// Return the parsed Message struct
+	return msg, nil
+}*/
 
 type MsgSendMessage struct {
 	Text string
