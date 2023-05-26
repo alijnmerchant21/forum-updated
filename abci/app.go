@@ -78,19 +78,21 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 
 }
 
-// Mempool Connection
-// Validate a tx for the mempool
 func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
-	// Find the user by their public key
-	user, err := app.DB.FindUser(app.msgSendmessage.From)
+	// Parse the tx message from raw bytes
+	txBytes := checktx.Tx
+
+	// Parse the tx message
+	msg, err := model.ParseTransactionMessage(string(txBytes))
+	fmt.Printf("msg is: %v", msg)
 	if err != nil {
-		return &abci.ResponseCheckTx{}, err
+		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
+		return &abci.ResponseCheckTx{}, nil
 	}
 
-	// Check if the user is banned
-	if app.user.IsBanned() {
-		return &abci.ResponseCheckTx{}, fmt.Errorf("user with public key %s is banned", user.PubKey)
-	}
+	// Debug print statement to verify the parsed message
+	//fmt.Printf("sender: %s\n:", msg.Sender)
+	//fmt.Printf("message: %s\n:", msg.Message)
 
 	return &abci.ResponseCheckTx{}, nil
 }
@@ -105,9 +107,10 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	// Extract the public keys from the transaction data
 	var pubKeys []ed25519.PubKey
 	for _, txBytes := range proposal.Txs {
-		tx, err := model.UnmarshalMessage(txBytes)
+		//tx, err := model.UnmarshalMessage(txBytes)
+		tx, err := model.ParseTransactionMessage((string(txBytes)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal transaction: %v", err)
+			return nil, fmt.Errorf("failed to parse transaction Prepare Proposal: %v", err)
 		}
 
 		// Extract the sender's public key from the message
@@ -126,9 +129,10 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	}
 
 	for _, rawTx := range rawTxs {
-		tx, err := model.UnmarshalMessage(rawTx)
+		//tx, err := model.UnmarshalMessage(rawTx)
+		tx, err := model.ParseTransactionMessage((string(rawTx)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal transaction: %v", err)
+			return nil, fmt.Errorf("failed to parse transaction rawtx: %v", err)
 		}
 
 		var sendMsg model.MsgSendMessage
@@ -158,9 +162,10 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 // Deliver the decided block with its txs to the Application
 func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	for _, txBytes := range finalizeblock.Txs {
-		tx, err := model.UnmarshalMessage(txBytes)
+		//tx, err := model.UnmarshalMessage(txBytes)
+		tx, err := model.ParseTransactionMessage((string(txBytes)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal transaction: %v", err)
+			return nil, fmt.Errorf("failed to parse transaction finalize: %v", err)
 		}
 
 		if err := app.DB.AddMessage(tx); err != nil {
