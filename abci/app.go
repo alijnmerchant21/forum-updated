@@ -2,7 +2,6 @@ package forum
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/alijnmerchant21/forum-updated/model"
@@ -92,55 +91,6 @@ func (ForumApp) InitChain(_ context.Context, initchain *abci.RequestInitChain) (
 }
 
 func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-	// Extract the public keys from the transaction data
-	var pubKeys []ed25519.PubKey
-	for _, txBytes := range proposal.Txs {
-		//tx, err := model.UnmarshalMessage(txBytes)
-		//tx, err := model.ParseTransactionMessage((string(txBytes)))
-		tx, err := model.ParseTransactionMessage((txBytes))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse transaction Prepare Proposal: %v", err)
-		}
-
-		// Extract the sender's public key from the message
-		var sendMsg model.MsgSendMessage
-		if err := json.Unmarshal([]byte(tx.Message), &sendMsg); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal message: %v", err)
-		}
-
-		pubKeys = append(pubKeys, sendMsg.From)
-	}
-
-	// Retrieve the raw transaction data using GetRawTxsByPubKeys
-	rawTxs, err := app.DB.GetRawTxsByPubKeys(pubKeys)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get raw txs: %v", err)
-	}
-
-	for _, rawTx := range rawTxs {
-		//tx, err := model.UnmarshalMessage(rawTx)
-		//tx, err := model.ParseTransactionMessage((string(rawTx)))
-		tx, err := model.ParseTransactionMessage((rawTx))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse transaction rawtx: %v", err)
-		}
-
-		var sendMsg model.MsgSendMessage
-		if err := json.Unmarshal([]byte(tx.Message), &sendMsg); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal message: %v", err)
-		}
-
-		// Check if the message contains any curse words
-		if model.IsCurseWord(sendMsg.Text) {
-			// Ban the user
-			err := app.messages.SetBan(app.msgSendmessage.From, true)
-			if err != nil {
-				return nil, fmt.Errorf("failed to ban user: %v", err)
-			}
-
-			return nil, fmt.Errorf("message contains curse words")
-		}
-	}
 
 	return &abci.ResponsePrepareProposal{}, nil
 }
