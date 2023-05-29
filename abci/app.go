@@ -101,17 +101,22 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 
 // Deliver the decided block with its txs to the Application
 func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
-	for _, txBytes := range finalizeblock.Txs {
-		//tx, err := model.UnmarshalMessage(txBytes)
-		//tx, err := model.ParseTransactionMessage((string(txBytes)))
-		tx, err := model.ParseTransactionMessage((txBytes))
+
+	// Iterate over Tx in current block
+	for _, tx := range finalizeblock.Txs {
+
+		// Parse tx
+		message, err := model.ParseMessage(tx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse transaction finalize: %v", err)
 		}
 
-		if err := app.DB.AddMessage(tx); err != nil {
+		// Add message to DB
+		err = model.AddMessage(app.db, *message)
+		if err != nil {
 			return nil, fmt.Errorf("failed to add message to database: %v", err)
 		}
+
 	}
 	return &abci.ResponseFinalizeBlock{}, nil
 }
