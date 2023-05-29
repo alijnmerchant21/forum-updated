@@ -3,6 +3,7 @@ package forum
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -50,9 +51,36 @@ func (ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseI
 
 // Query blockchain
 func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
+	resp := abci.ResponseQuery{Key: query.Data}
+	// curl -s 'localhost:26657/abci_query?data="cometbft"'
+	println("Entered query")
+	// Parse sender from query data
+	sender := string(query.Data)
+	println("Sender is: ", sender)
 
-	return &abci.ResponseQuery{}, nil
+	// Retrieve all message sent by the sender
+	println("Before GetMessage")
+	messages, err := model.GetMessagesBySender(app.DB, sender)
+	println("After GetMessage")
+	if err != nil {
+		//return nil, err
+		print("Error in GetMessageSender", err)
+	}
 
+	// Convert the messages to JSON and return as query result
+
+	resultBytes, err := json.Marshal(messages)
+	if err != nil {
+		//return nil, err
+		print("Error in Marshalling", err)
+	}
+
+	resultStr := string(resultBytes)
+
+	resp.Log = resultStr
+	resp.Value = resultBytes
+
+	return &resp, nil
 }
 
 func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
