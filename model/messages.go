@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	dbm "github.com/cometbft/cometbft-db"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/pkg/errors"
 )
@@ -34,22 +33,31 @@ func AddMessage(db *DB, message Message) error {
 }
 
 // GetMessagesBySender retrieves all messages sent by a specific sender
-func GetMessagesBySender(db dbm.DB, sender string) ([]Message, error) {
+func GetMessagesBySender(db *DB, sender string) ([]Message, error) {
 	messages := []Message{}
-	iter, err := db.Iterator(nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer iter.Close()
-	for ; iter.Valid(); iter.Next() {
-		var message Message
-		err := gob.NewDecoder(bytes.NewReader(iter.Value())).Decode(&message)
-		if err != nil {
-			return nil, err
-		}
-		if message.Sender == sender {
+	err := db.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		prefix := []byte(sender)
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			value, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			var message Message
+			err = gob.NewDecoder(bytes.NewReader(value)).Decode(&message)
+			if err != nil {
+				return err
+			}
 			messages = append(messages, message)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return messages, nil
 }
