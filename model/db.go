@@ -64,7 +64,7 @@ func (db *DB) CreateUser(user *User) error {
 		return nil
 	})
 	if err != nil {
-		return errors.Wrap(err, "failed to create user")
+		return err
 	}
 
 	return nil
@@ -87,10 +87,16 @@ func (db *DB) FindUserByName(name string) (*User, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to find user")
+		return nil, err
 	}
 
 	return &user, nil
+}
+
+func (db *DB) Set(key, value []byte) error {
+	return db.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(key, value)
+	})
 }
 
 func (db *DB) Close() error {
