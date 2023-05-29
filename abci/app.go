@@ -171,7 +171,9 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.Reques
 
 // Commit the state and return the application Merkle root hash
 func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.ResponseCommit, error) {
+	fmt.Println("entered Commit")
 	if err := app.DB.Commit(); err != nil {
+		fmt.Println("Commit failed:", err)
 		return nil, err
 	}
 	return &abci.ResponseCommit{}, nil
