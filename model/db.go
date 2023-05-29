@@ -34,6 +34,7 @@ func NewDB(dbPath string) (*DB, error) {
 	dbInstance.Init(db)
 
 	return dbInstance, nil
+
 }
 
 func (db *DB) GetDB() *badger.DB {

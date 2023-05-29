@@ -21,10 +21,12 @@ type ForumApp struct {
 func NewForumApp(dbDir string) (*ForumApp, error) {
 	db, err := model.NewDB(dbDir)
 	if err != nil {
+		fmt.Printf("Error initializing database: %s\n", err)
 		return nil, err
 	}
 
 	user := &model.User{}
+	//db := &model.DB{}
 
 	return &ForumApp{
 		User: user,
