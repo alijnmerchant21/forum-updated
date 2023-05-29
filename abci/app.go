@@ -2,6 +2,7 @@ package forum
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -18,6 +19,9 @@ type ForumApp struct {
 	DB   *model.DB
 	Msg  *model.Message
 	db   dbm.DB
+
+	stagedTxs [][]byte
+	state     State
 }
 
 func NewForumApp(dbDir string) (*ForumApp, error) {
@@ -34,6 +38,8 @@ func NewForumApp(dbDir string) (*ForumApp, error) {
 		User: user,
 		DB:   db,
 		db:   dbm.NewMemDB(),
+
+		stagedTxs: make([][]byte, 0),
 	}, nil
 }
 
@@ -108,24 +114,31 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 
 // Deliver the decided block with its txs to the Application
 func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+	app.stagedTxs = make([][]byte, 0)
 
-	// Iterate over Tx in current block
-	for _, tx := range finalizeblock.Txs {
-
-		// Parse tx
-		message, err := model.ParseMessage(tx)
+	respTxs := make([]*abci.ExecTxResult, len(finalizeblock.Txs))
+	for i, tx := range finalizeblock.Txs {
+		msg, err := model.ParseMessage(tx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse transaction finalize: %v", err)
+			respTxs[i] = &abci.ExecTxResult{Code: 1}
+		} else {
+			app.stagedTxs = append(app.stagedTxs, tx)
+			err = model.AddMessage(app.DB, *msg)
+			if err != nil {
+				respTxs[i] = &abci.ExecTxResult{Code: 1}
+			} else {
+				respTxs[i] = &abci.ExecTxResult{Code: 0}
+			}
 		}
 
-		// Add message to DB
-		err = model.AddMessage(app.db, *message)
-		if err != nil {
-			return nil, fmt.Errorf("failed to add message to database: %v", err)
-		}
-
+		app.state.Size++
 	}
-	return &abci.ResponseFinalizeBlock{}, nil
+
+	app.state.Height = finalizeblock.Height
+
+	response := &abci.ResponseFinalizeBlock{TxResults: respTxs, AppHash: app.state.Hash()}
+
+	return response, nil
 }
 
 // Commit the state and return the application Merkle root hash
@@ -160,4 +173,17 @@ func (ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote
 
 func (ForumApp) VerifyVoteExtension(_ context.Context, verifyvoteextension *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
 	return &abci.ResponseVerifyVoteExtension{}, nil
+}
+
+// ----
+
+type State struct {
+	Size   int64 `json:"size"`
+	Height int64 `json:"height"`
+}
+
+func (s State) Hash() []byte {
+	appHash := make([]byte, 8)
+	binary.PutVarint(appHash, s.Size)
+	return appHash
 }
