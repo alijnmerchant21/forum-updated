@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	dbm "github.com/cometbft/cometbft-db"
+	"github.com/dgraph-io/badger/v3"
 	"github.com/pkg/errors"
 )
 
@@ -17,13 +18,18 @@ type Message struct {
 }
 
 // AddMessage adds a message to the database
-func AddMessage(db dbm.DB, message Message) error {
+func AddMessage(db *DB, message Message) error {
 	buf := new(bytes.Buffer)
 	err := gob.NewEncoder(buf).Encode(message)
 	if err != nil {
 		return err
 	}
-	db.Set([]byte(message.Sender), buf.Bytes())
+	err = db.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(message.Sender), buf.Bytes())
+	})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
