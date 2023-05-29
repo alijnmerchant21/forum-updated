@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/alijnmerchant21/forum-updated/model"
-	dbm "github.com/cometbft/cometbft-db"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/dgraph-io/badger/v3"
@@ -19,7 +19,6 @@ type ForumApp struct {
 	User *model.User
 	DB   *model.DB
 	Msg  *model.Message
-	db   dbm.DB
 
 	stagedTxs [][]byte
 	state     State
@@ -36,10 +35,8 @@ func NewForumApp(dbDir string) (*ForumApp, error) {
 	//db := &model.DB{}
 
 	return &ForumApp{
-		User: user,
-		DB:   db,
-		db:   dbm.NewMemDB(),
-
+		User:      user,
+		DB:        db,
 		stagedTxs: make([][]byte, 0),
 	}, nil
 }
