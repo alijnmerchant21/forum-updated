@@ -2,12 +2,14 @@ package forum
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/alijnmerchant21/forum-updated/model"
 	dbm "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/ed25519"
+	"github.com/dgraph-io/badger/v3"
 )
 
 type ForumApp struct {
@@ -53,34 +55,37 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 	msg, err := model.ParseMessage(checktx.Tx)
 	if err != nil {
 		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
-		return &abci.ResponseCheckTx{}, nil
+		return &abci.ResponseCheckTx{Code: 1}, err
 	}
 
 	u, err := app.DB.FindUserByName(msg.Sender)
+
 	if err != nil {
-		fmt.Printf("failed to find user checktx: %v\n", err)
-		return &abci.ResponseCheckTx{}, nil
-	}
 
-	if u == nil {
-		newUser := model.User{
-			Name:      msg.Sender,
-			PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
-			Moderator: false,
-			Banned:    false,
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			fmt.Println("User has not been found adding user")
+			newUser := model.User{
+				Name:      msg.Sender,
+				PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
+				Moderator: false,
+				Banned:    false,
+			}
+
+			err := app.DB.CreateUser(&newUser)
+			if err != nil {
+				fmt.Printf("failed to create user checktx: %v\n", err)
+				return &abci.ResponseCheckTx{Code: 1}, err
+			}
+
+			fmt.Println("User added")
+
+		} else {
+			fmt.Printf("failed to find user checktx: %v\n", err)
+			return &abci.ResponseCheckTx{Code: 1, GasWanted: 1}, err
 		}
-
-		err := app.DB.CreateUser(&newUser)
-		if err != nil {
-			fmt.Printf("failed to create user checktx: %v\n", err)
-			return &abci.ResponseCheckTx{}, nil
-		}
-
-		fmt.Println("User added")
 	}
-
 	if u != nil {
-		fmt.Println("User exist")
+		fmt.Println("User exist:")
 	}
 
 	return &abci.ResponseCheckTx{Code: 0}, nil
