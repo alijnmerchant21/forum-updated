@@ -2,27 +2,21 @@ package forum
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
-	//"forum/model"
-
-	"github.com/cometbft/cometbft/crypto/ed25519"
-
 	"github.com/alijnmerchant21/forum-updated/model"
+	dbm "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/crypto/ed25519"
 )
-
-//var _ abci.Application = ForumApp{}
 
 type ForumApp struct {
 	abci.BaseApplication
-
-	DB             *model.DB
-	messages       *model.Messages
-	msgSendmessage *model.MsgSendMessage
-	user           *model.User
+	User *model.User
+	DB   *model.DB
+	Msg  *model.Message
+	db   dbm.DB
 }
 
 func NewForumApp(dbDir string) (*ForumApp, error) {
@@ -31,14 +25,12 @@ func NewForumApp(dbDir string) (*ForumApp, error) {
 		return nil, err
 	}
 
-	messages := model.NewMessages(db)
 	user := &model.User{}
 
 	return &ForumApp{
-		DB:             db,
-		messages:       messages,
-		msgSendmessage: &model.MsgSendMessage{},
-		user:           user,
+		User: user,
+		DB:   db,
+		db:   dbm.NewMemDB(),
 	}, nil
 }
 
@@ -49,41 +41,19 @@ func (ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseI
 
 // Query blockchain
 func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
-	var response abci.ResponseQuery
-	switch query.Path {
-	case "/messages/":
-		pubkeyBytes, err := base64.StdEncoding.DecodeString(string(query.Data))
-		if err != nil {
-			return nil, err
-		}
 
-		pubkey := ed25519.PubKey(pubkeyBytes)
-
-		messages, err := app.messages.GetMessage(pubkey)
-		if err != nil {
-			return nil, err
-		}
-
-		bytes, err := json.Marshal(messages)
-		if err != nil {
-			return nil, err
-		}
-
-		response.Value = bytes
-	default:
-		return nil, abci.ErrInvalidLengthTypes
-	}
-
-	return &response, nil
+	return &abci.ResponseQuery{}, nil
 
 }
 
 func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
 	// Parse the tx message from raw bytes
 	txBytes := checktx.Tx
+	fmt.Printf("raw bytes is %v", checktx.Tx)
 
 	// Parse the tx message
-	msg, err := model.ParseTransactionMessage(string(txBytes))
+	//msg, err := model.ParseTransactionMessage(string(txBytes))
+	msg, err := model.ParseTransactionMessage((txBytes))
 	fmt.Printf("msg is: %v", msg)
 	if err != nil {
 		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
@@ -108,7 +78,8 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	var pubKeys []ed25519.PubKey
 	for _, txBytes := range proposal.Txs {
 		//tx, err := model.UnmarshalMessage(txBytes)
-		tx, err := model.ParseTransactionMessage((string(txBytes)))
+		//tx, err := model.ParseTransactionMessage((string(txBytes)))
+		tx, err := model.ParseTransactionMessage((txBytes))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse transaction Prepare Proposal: %v", err)
 		}
@@ -130,7 +101,8 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 
 	for _, rawTx := range rawTxs {
 		//tx, err := model.UnmarshalMessage(rawTx)
-		tx, err := model.ParseTransactionMessage((string(rawTx)))
+		//tx, err := model.ParseTransactionMessage((string(rawTx)))
+		tx, err := model.ParseTransactionMessage((rawTx))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse transaction rawtx: %v", err)
 		}
@@ -163,7 +135,8 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	for _, txBytes := range finalizeblock.Txs {
 		//tx, err := model.UnmarshalMessage(txBytes)
-		tx, err := model.ParseTransactionMessage((string(txBytes)))
+		//tx, err := model.ParseTransactionMessage((string(txBytes)))
+		tx, err := model.ParseTransactionMessage((txBytes))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse transaction finalize: %v", err)
 		}
