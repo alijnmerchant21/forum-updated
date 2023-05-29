@@ -19,7 +19,7 @@ type ForumApp struct {
 }
 
 func NewForumApp(dbDir string) (*ForumApp, error) {
-	db, err := model.New(dbDir)
+	db, err := model.NewDB(dbDir)
 	if err != nil {
 		return nil, err
 	}
