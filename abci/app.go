@@ -47,24 +47,42 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 }
 
 func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
-	// Parse the tx message from raw bytes
-	txBytes := checktx.Tx
-	fmt.Printf("raw bytes is %v", checktx.Tx)
 
 	// Parse the tx message
-	//msg, err := model.ParseTransactionMessage(string(txBytes))
-	msg, err := model.ParseTransactionMessage((txBytes))
-	fmt.Printf("msg is: %v", msg)
+	msg, err := model.ParseMessage(checktx.Tx)
 	if err != nil {
 		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
 		return &abci.ResponseCheckTx{}, nil
 	}
 
-	// Debug print statement to verify the parsed message
-	//fmt.Printf("sender: %s\n:", msg.Sender)
-	//fmt.Printf("message: %s\n:", msg.Message)
+	u, err := app.DB.FindUserByName(msg.Sender)
+	if err != nil {
+		fmt.Printf("failed to find user checktx: %v\n", err)
+		return &abci.ResponseCheckTx{}, nil
+	}
 
-	return &abci.ResponseCheckTx{}, nil
+	if u == nil {
+		newUser := model.User{
+			Name:      msg.Sender,
+			PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
+			Moderator: false,
+			Banned:    false,
+		}
+
+		err := app.DB.CreateUser(&newUser)
+		if err != nil {
+			fmt.Printf("failed to create user checktx: %v\n", err)
+			return &abci.ResponseCheckTx{}, nil
+		}
+
+		fmt.Println("User added")
+	}
+
+	if u != nil {
+		fmt.Println("User exist")
+	}
+
+	return &abci.ResponseCheckTx{Code: 0}, nil
 }
 
 // Consensus Connection
