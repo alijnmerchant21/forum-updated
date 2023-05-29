@@ -122,7 +122,10 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.Reques
 }
 
 // Commit the state and return the application Merkle root hash
-func (ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.ResponseCommit, error) {
+func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.ResponseCommit, error) {
+	if err := app.DB.Commit(); err != nil {
+		return nil, err
+	}
 	return &abci.ResponseCommit{}, nil
 }
 
