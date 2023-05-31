@@ -1,8 +1,6 @@
 package model
 
 import (
-	"bytes"
-	"encoding/gob"
 	"fmt"
 	"strings"
 
@@ -17,14 +15,21 @@ type Message struct {
 }
 
 // AddMessage adds a message to the database
+// AddMessage uses string
+// To be changed to array later
 func AddMessage(db *DB, message Message) error {
-	buf := new(bytes.Buffer)
-	err := gob.NewEncoder(buf).Encode(message)
-	if err != nil {
+	// Get the existing messages for the sender
+	existingMessages, err := GetMessagesBySender(db, message.Sender)
+	if err != nil && err != badger.ErrKeyNotFound {
 		return err
 	}
+
+	// Append the new message to the string
+	existingMessages += message.Message + "\n"
+
+	// Store the updated string in the Badger database
 	err = db.db.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(message.Sender), buf.Bytes())
+		return txn.Set([]byte(message.Sender), []byte(existingMessages))
 	})
 	if err != nil {
 		return err
@@ -33,38 +38,29 @@ func AddMessage(db *DB, message Message) error {
 }
 
 // GetMessagesBySender retrieves all messages sent by a specific sender
-func GetMessagesBySender(db *DB, sender string) ([]Message, error) {
-	messages := []Message{}
+// Get Message using String
+func GetMessagesBySender(db *DB, sender string) (string, error) {
+	var messages string
 	err := db.db.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		it := txn.NewIterator(opts)
-		defer it.Close()
-		prefix := []byte(sender)
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			value, err := item.ValueCopy(nil)
-			if err != nil {
-				return err
-			}
-			var message Message
-			err = gob.NewDecoder(bytes.NewReader(value)).Decode(&message)
-			if err != nil {
-				return err
-			}
-			messages = append(messages, message)
+		item, err := txn.Get([]byte(sender))
+		if err != nil {
+			return err
 		}
+		value, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		messages = string(value)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	return messages, nil
 }
 
 // Parse Message
 func ParseMessage(tx []byte) (*Message, error) {
-	fmt.Println("Inside Parse func")
 	msg := &Message{}
 
 	// Parse the message into key-value pairs
@@ -101,7 +97,6 @@ func ParseMessage(tx []byte) (*Message, error) {
 	if msg.Message == "" {
 		return nil, errors.New("message is missing message")
 	}
-	fmt.Println("Exiting Parse func")
 
 	return msg, nil
 }
