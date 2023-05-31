@@ -14,6 +14,7 @@ type DB struct {
 
 func (db *DB) Init(database *badger.DB) {
 	db.db = database
+	db.Set([]byte("history"), []byte("BEGIN:"))
 }
 
 func (db *DB) Commit() error {

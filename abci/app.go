@@ -54,6 +54,21 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 	// Parse sender from query data
 	sender := string(query.Data)
 
+	if sender == "history" {
+		messages, err := model.FetchHistory(app.DB)
+		if err != nil {
+			fmt.Println("Error fetching history")
+			return nil, err
+		}
+		if err != nil {
+			fmt.Println("error unmarshalling when fetching:", err)
+		}
+
+		resp.Log = messages
+		resp.Value = []byte(messages)
+
+		return &resp, nil
+	}
 	// Retrieve all message sent by the sender
 	messages, err := model.GetMessagesBySender(app.DB, sender)
 	if err != nil {
@@ -190,10 +205,10 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			} else {
 				app.stagedTxs = append(app.stagedTxs, tx)
 				// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
-				respTxs[i] = &types.ExecTxResult{Code: 0}
+				respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
 			}
 		} else {
-			respTxs[i] = &types.ExecTxResult{Code: 0}
+			respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
 			app.stagedBanTxs = append(app.stagedBanTxs, tx)
 		}
 	}
@@ -251,6 +266,7 @@ func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci
 			}
 		}
 	}
+
 	app.DB.GetDB().Sync()
 	return &abci.ResponseCommit{}, nil
 }

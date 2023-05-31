@@ -18,6 +18,44 @@ type Message struct {
 	Message string `json:"message"`
 }
 
+type MsgHistory struct {
+	Msg string `json:"history"`
+}
+
+func AppendHistory(db *DB, message Message) error {
+	historyBytes, err := ViewDB(db.GetDB(), []byte("history"))
+	if err != nil {
+		fmt.Println("Error fething historu:", err)
+		return err
+	}
+	msgBytes := string(historyBytes)
+	msgBytes = msgBytes + "{sender:" + message.Sender + ",message:" + message.Message + "}"
+	if err != nil {
+		fmt.Println("erro appending mssg to history: ", err)
+	}
+
+	fmt.Println("Appending message to history")
+	err = db.Set([]byte("history"), []byte(msgBytes))
+	if err != nil {
+		fmt.Println("Error updating history:", err)
+	}
+	return err
+}
+
+func FetchHistory(db *DB) (string, error) {
+	historyBytes, err := ViewDB(db.GetDB(), []byte("history"))
+	if err != nil {
+		fmt.Println("Error fething historu:", err)
+		return "", err
+	}
+	msgHistory := string(historyBytes)
+
+	if err != nil {
+		fmt.Println("erro appending history: ", err)
+	}
+	return msgHistory, err
+}
+
 // AddMessage adds a message to the database
 // AddMessage uses string
 // To be changed to array later
@@ -39,7 +77,8 @@ func AddMessage(db *DB, message Message) error {
 	if err != nil {
 		return err
 	}
-	return nil
+	err = AppendHistory(db, message)
+	return err
 }
 
 // GetMessagesBySender retrieves all messages sent by a specific sender
