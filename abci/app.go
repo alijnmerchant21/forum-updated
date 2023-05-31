@@ -20,7 +20,8 @@ type ForumApp struct {
 	DB   *model.DB
 	Msg  *model.Message
 
-	stagedTxs [][]byte
+	stagedTxs    [][]byte
+	stagedBanTxs [][]byte
 }
 
 func NewForumApp(dbDir string) (*ForumApp, error) {
@@ -34,9 +35,10 @@ func NewForumApp(dbDir string) (*ForumApp, error) {
 	//db := &model.DB{}
 
 	return &ForumApp{
-		User:      user,
-		DB:        db,
-		stagedTxs: make([][]byte, 0),
+		User:         user,
+		DB:           db,
+		stagedTxs:    make([][]byte, 0),
+		stagedBanTxs: make([][]byte, 0),
 	}, nil
 }
 
@@ -170,76 +172,86 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 
 // Deliver the decided block with its txs to the Application
 func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
-	app.stagedTxs = make([][]byte, 0)
-
 	fmt.Println("entered finalizeBlock")
 	// Iterate over Tx in current block
 
-	app.stagedTxs = make([][]byte, 0)
-
 	respTxs := make([]*types.ExecTxResult, len(req.Txs))
-	// processedBans := false
 	for i, tx := range req.Txs {
 
 		banTx := new(model.BanTx)
-		var msg *model.Message
-
+		//Check if it's a banned transaction
 		err := json.Unmarshal(tx, &banTx)
 		if err != nil {
+			// If not try to parse the tx as a normal message
 			fmt.Println("No bans:", err, " AND ", string(tx))
-			// processedBans = true
-			msg, err = model.ParseMessage(tx)
+			_, err := model.ParseMessage(tx)
 			if err != nil {
 				respTxs[i] = &types.ExecTxResult{Code: 2}
 			} else {
 				app.stagedTxs = append(app.stagedTxs, tx)
-				err = model.AddMessage(app.DB, *msg)
-				if err != nil {
-					respTxs[i] = &types.ExecTxResult{Code: 1}
-				} else {
-					respTxs[i] = &types.ExecTxResult{Code: 0}
-				}
+				// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
+				respTxs[i] = &types.ExecTxResult{Code: 0}
 			}
 		} else {
-			u, err := app.DB.FindUserByName(banTx.UserName)
-			if err == badger.ErrKeyNotFound {
-				newUser := model.User{
-					Name:      banTx.UserName,
-					PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
-					Moderator: false,
-					Banned:    true,
-				}
-				err := app.DB.CreateUser(&newUser)
-				if err != nil {
-					respTxs[i] = &types.ExecTxResult{Code: 1}
-				}
-				u = &newUser
-				respTxs[i] = &types.ExecTxResult{Code: 0}
-				continue
-			}
-			if err == nil {
-				u.Banned = true
-				err = app.DB.UpdateUser(*u)
-				respTxs[i] = &types.ExecTxResult{Code: 0}
-				if err != nil {
-					fmt.Println("Error updating user :", err)
-				}
-			} else {
-				respTxs[i] = &types.ExecTxResult{Code: 1}
-			}
+			respTxs[i] = &types.ExecTxResult{Code: 0}
+			app.stagedBanTxs = append(app.stagedBanTxs, tx)
 		}
-
 	}
 	response := &abci.ResponseFinalizeBlock{TxResults: respTxs}
 	return response, nil
 }
 
 // Commit the state and return the application Merkle root hash
+// Here we actually write the staged transactions into the database.
+// For details on why it has to be done here, check the Crash recovery section
+// of the ABCI spec
 func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.ResponseCommit, error) {
-	if err := app.DB.Commit(); err != nil {
-		fmt.Println("Commit failed:", err)
-		return nil, err
+	banTx := new(model.BanTx)
+	for _, tx := range app.stagedBanTxs {
+		err := json.Unmarshal(tx, &banTx)
+		if err != nil {
+			return nil, err
+		}
+		u, err := app.DB.FindUserByName(banTx.UserName)
+		if err == badger.ErrKeyNotFound {
+			newUser := model.User{
+				Name:      banTx.UserName,
+				PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
+				Moderator: false,
+				Banned:    true,
+			}
+			err := app.DB.CreateUser(&newUser)
+			if err != nil {
+				return nil, err
+			}
+			u = &newUser
+			continue
+		}
+		if err == nil {
+			u.Banned = true
+			err = app.DB.UpdateUser(*u)
+			fmt.Println("Error updating user :", err)
+
+		} else {
+			return nil, err
+		}
+
 	}
+	fmt.Println("Commit banned txs succeeded")
+
+	for _, tx := range app.stagedTxs {
+		fmt.Println("Committing ", string(tx))
+		msg, err := model.ParseMessage(tx)
+		if err != nil {
+			return nil, err
+		} else {
+			err = model.AddMessage(app.DB, *msg)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	app.DB.GetDB().Sync()
 	return &abci.ResponseCommit{}, nil
 }
 
