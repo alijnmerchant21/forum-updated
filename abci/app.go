@@ -190,6 +190,8 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 	fmt.Println("entered finalizeBlock")
 	// Iterate over Tx in current block
 
+	app.stagedBanTxs = make([][]byte, 0)
+	app.stagedTxs = make([][]byte, 0)
 	respTxs := make([]*types.ExecTxResult, len(req.Txs))
 	for i, tx := range req.Txs {
 
