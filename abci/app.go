@@ -2,7 +2,6 @@ package forum
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +20,6 @@ type ForumApp struct {
 	Msg  *model.Message
 
 	stagedTxs [][]byte
-	state     State
 }
 
 func NewForumApp(dbDir string) (*ForumApp, error) {
@@ -49,32 +47,23 @@ func (ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseI
 // Query blockchain
 func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
 	resp := abci.ResponseQuery{Key: query.Data}
-	// curl -s 'localhost:26657/abci_query?data="cometbft"'
-	println("Entered query")
+
 	// Parse sender from query data
 	sender := string(query.Data)
-	println("Sender is: ", sender)
 
 	// Retrieve all message sent by the sender
-	println("Before GetMessage")
 	messages, err := model.GetMessagesBySender(app.DB, sender)
-	println("After GetMessage")
 	if err != nil {
-		//return nil, err
-		print("Error in GetMessageSender", err)
+		return nil, err
 	}
 
 	// Convert the messages to JSON and return as query result
-
 	resultBytes, err := json.Marshal(messages)
 	if err != nil {
-		//return nil, err
-		print("Error in Marshalling", err)
+		return nil, err
 	}
 
-	resultStr := string(resultBytes)
-
-	resp.Log = resultStr
+	resp.Log = string(resultBytes)
 	resp.Value = resultBytes
 
 	return &resp, nil
@@ -112,10 +101,14 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 
 		} else {
 			fmt.Printf("failed to find user checktx: %v\n", err)
-			return &abci.ResponseCheckTx{Code: 1, GasWanted: 1}, err
+			return &abci.ResponseCheckTx{Code: 1}, err
 		}
 	}
 	if u != nil {
+		if u.Banned {
+			err = fmt.Errorf("user is banned")
+			return &abci.ResponseCheckTx{Code: 1}, err
+		}
 		fmt.Println("User exist:")
 	}
 
@@ -129,8 +122,27 @@ func (ForumApp) InitChain(_ context.Context, initchain *abci.RequestInitChain) (
 }
 
 func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
+	proposedTxs := make([][]byte, len(proposal.Txs))
+	for _, tx := range proposal.Txs {
+		msg, err := model.ParseMessage(tx)
+		if err == nil {
+			if !model.IsCurseWord(msg.Message) {
+				proposedTxs = append(proposedTxs, tx)
+			} else {
+				u, err := app.DB.FindUserByName(msg.Sender)
+				if err == nil {
+					u.Banned = true
+					err = app.DB.UpdateUser(*u)
+					if err != nil {
+						fmt.Println("Error updating user :", err)
+					}
 
-	return &abci.ResponsePrepareProposal{}, nil
+				}
+				fmt.Println("transaction contains curse words")
+			}
+		}
+	}
+	return &abci.ResponsePrepareProposal{Txs: proposedTxs}, nil
 }
 
 func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
@@ -140,12 +152,12 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 // Deliver the decided block with its txs to the Application
 func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	app.stagedTxs = make([][]byte, 0)
-
 	respTxs := make([]*abci.ExecTxResult, len(finalizeblock.Txs))
+
 	for i, tx := range finalizeblock.Txs {
 		msg, err := model.ParseMessage(tx)
 		if err != nil {
-			respTxs[i] = &abci.ExecTxResult{Code: 1}
+			respTxs[i] = &abci.ExecTxResult{Code: 2}
 		} else {
 			app.stagedTxs = append(app.stagedTxs, tx)
 			err = model.AddMessage(app.DB, *msg)
@@ -155,20 +167,14 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.Reques
 				respTxs[i] = &abci.ExecTxResult{Code: 0}
 			}
 		}
-
-		app.state.Size++
 	}
 
-	app.state.Height = finalizeblock.Height
-
-	response := &abci.ResponseFinalizeBlock{TxResults: respTxs, AppHash: app.state.Hash()}
-
+	response := &abci.ResponseFinalizeBlock{TxResults: respTxs}
 	return response, nil
 }
 
 // Commit the state and return the application Merkle root hash
 func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.ResponseCommit, error) {
-	fmt.Println("entered Commit")
 	if err := app.DB.Commit(); err != nil {
 		fmt.Println("Commit failed:", err)
 		return nil, err
@@ -200,17 +206,4 @@ func (ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote
 
 func (ForumApp) VerifyVoteExtension(_ context.Context, verifyvoteextension *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
 	return &abci.ResponseVerifyVoteExtension{}, nil
-}
-
-// ----
-
-type State struct {
-	Size   int64 `json:"size"`
-	Height int64 `json:"height"`
-}
-
-func (s State) Hash() []byte {
-	appHash := make([]byte, 8)
-	binary.PutVarint(appHash, s.Size)
-	return appHash
 }
