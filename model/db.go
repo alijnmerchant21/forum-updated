@@ -1,7 +1,6 @@
 package model
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -79,35 +78,25 @@ func (db *DB) CreateUser(user *User) error {
 
 func (db *DB) FindUserByName(name string) (*User, error) {
 	// Read the user from the database
-	var user User
+	var user *User
 	err := db.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(name))
 		if err != nil {
 			return err
 		}
+		fmt.Println("PRTINTIN ", item.String())
+
 		err = item.Value(func(val []byte) error {
-			// Currently, the code fails because the message is appended to value.
-			// Example value returns something like: {"Name":"Harry","PubKey":"5oTd/trVFVTTExUV83Hp3Uwf43g9lR8Qk+UmEXqMENo=","Moderator":false,"Banned":true,"NumMessages":0,"Version":0,"SchemaVersion":0}HelloWorld.
-			// Message appended after value causes the func to break as it expects '}' in the end.
-			// Bandage fix: Just remove any data after '}'
-			// String is causing this issue maybe. Once we switch back to array this should be fixed.
-			end := bytes.IndexByte(val, '}') + 1
-			if end <= 0 || end > len(val) {
-				return fmt.Errorf("invalid JSON data")
-			}
-			val = val[:end]
 			return json.Unmarshal(val, &user)
 		})
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	if err != nil {
+		fmt.Println("Error in retrieveing user: ", err)
 		return nil, err
 	}
 
-	return &user, nil
+	return user, nil
 }
 
 func (db *DB) Set(key, value []byte) error {
@@ -140,6 +129,7 @@ func ViewDB(db *badger.DB, key []byte) ([]byte, error) {
 
 func (db *DB) UpdateUser(u User) error {
 	err := db.db.Update(func(txn *badger.Txn) error {
+		fmt.Println("Updating user ", u.Name)
 		userBytes, err := json.Marshal(u)
 		if err != nil {
 			return err

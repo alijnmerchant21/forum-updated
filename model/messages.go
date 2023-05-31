@@ -8,6 +8,10 @@ import (
 	"github.com/pkg/errors"
 )
 
+type BanTx struct {
+	UserName string `json:"username"`
+}
+
 // Message represents a message sent by a user
 type Message struct {
 	Sender  string `json:"sender"`
@@ -25,11 +29,12 @@ func AddMessage(db *DB, message Message) error {
 	}
 
 	// Append the new message to the string
-	existingMessages += message.Message + "\n"
-
+	fmt.Println("existing Pre :", existingMessages)
+	existingMessages = existingMessages + ";" + message.Message
+	fmt.Println("existing Post :", existingMessages)
 	// Store the updated string in the Badger database
 	err = db.db.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(message.Sender), []byte(existingMessages))
+		return txn.Set([]byte(message.Sender+"msg"), []byte(existingMessages))
 	})
 	if err != nil {
 		return err
@@ -42,7 +47,7 @@ func AddMessage(db *DB, message Message) error {
 func GetMessagesBySender(db *DB, sender string) (string, error) {
 	var messages string
 	err := db.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(sender))
+		item, err := txn.Get([]byte(sender + "msg"))
 		if err != nil {
 			return err
 		}

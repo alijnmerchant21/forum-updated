@@ -8,6 +8,7 @@ import (
 
 	"github.com/alijnmerchant21/forum-updated/model"
 
+	"github.com/cometbft/cometbft/abci/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/ed25519"
 	"github.com/dgraph-io/badger/v3"
@@ -54,12 +55,14 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 	// Retrieve all message sent by the sender
 	messages, err := model.GetMessagesBySender(app.DB, sender)
 	if err != nil {
+		fmt.Println("Error in query1")
 		return nil, err
 	}
 
 	// Convert the messages to JSON and return as query result
 	resultBytes, err := json.Marshal(messages)
 	if err != nil {
+		fmt.Println("Error in query")
 		return nil, err
 	}
 
@@ -77,42 +80,20 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
 		return &abci.ResponseCheckTx{Code: 1}, err
 	}
-
+	fmt.Println("Searching for sender ... ", msg.Sender)
 	u, err := app.DB.FindUserByName(msg.Sender)
 
-	if err != nil {
-
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			fmt.Println("User has not been found adding user")
-			newUser := model.User{
-				Name:      msg.Sender,
-				PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
-				Moderator: false,
-				Banned:    false,
-			}
-
-			err := app.DB.CreateUser(&newUser)
-			if err != nil {
-				fmt.Printf("failed to create user checktx: %v\n", err)
-				return &abci.ResponseCheckTx{Code: 1}, err
-			}
-
-			fmt.Println("User added")
-
-		} else {
-			fmt.Printf("failed to find user checktx: %v\n", err)
-			return &abci.ResponseCheckTx{Code: 1}, err
-		}
-	}
-	if u != nil {
-		if u.Banned {
-			err = fmt.Errorf("user is banned")
-			return &abci.ResponseCheckTx{Code: 1}, err
-		}
-		fmt.Println("User exist:")
+	if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+		fmt.Println("problem in check tx: ", string(checktx.Tx))
+		return &types.ResponseCheckTx{Code: 1}, err
 	}
 
-	return &abci.ResponseCheckTx{Code: 0}, nil
+	if u != nil && u.Banned {
+		err = fmt.Errorf("user is banned")
+		return &types.ResponseCheckTx{Code: 1}, err
+	}
+	fmt.Println("Check tx success for ", msg.Message, " and ", msg.Sender)
+	return &types.ResponseCheckTx{Code: 0}, nil
 }
 
 // Consensus Connection
@@ -122,53 +103,133 @@ func (ForumApp) InitChain(_ context.Context, initchain *abci.RequestInitChain) (
 }
 
 func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-	proposedTxs := make([][]byte, len(proposal.Txs))
+	fmt.Println("entered prepareProp")
+
+	// prepare proposal puts the BanTx first, then adds the other transactions
+	// ProcessProposal should verify this
+	proposedTxs := make([][]byte, 0)
+	finalProposal := make([][]byte, 0)
+	bannedUsersString := make(map[string]struct{})
 	for _, tx := range proposal.Txs {
 		msg, err := model.ParseMessage(tx)
 		if err == nil {
 			if !model.IsCurseWord(msg.Message) {
 				proposedTxs = append(proposedTxs, tx)
 			} else {
-				u, err := app.DB.FindUserByName(msg.Sender)
+				banTx := model.BanTx{UserName: msg.Sender}
+				bannedUsersString[msg.Message] = struct{}{}
+				resultBytes, err := json.Marshal(banTx)
 				if err == nil {
-					u.Banned = true
-					err = app.DB.UpdateUser(*u)
-					if err != nil {
-						fmt.Println("Error updating user :", err)
-					}
-
+					finalProposal = append(finalProposal, resultBytes)
 				}
-				fmt.Println("transaction contains curse words")
 			}
 		}
 	}
-	return &abci.ResponsePrepareProposal{Txs: proposedTxs}, nil
+	// Need to loop again through the proposed Txs to make sure there is none left by a user that was banned after the tx was accepted
+	for _, tx := range proposedTxs {
+		// there should be no error here as these are just transactions we have checked and added
+		msg, _ := model.ParseMessage(tx)
+		if _, ok := bannedUsersString[msg.Sender]; !ok {
+			finalProposal = append(finalProposal, tx)
+		}
+	}
+	return &types.ResponsePrepareProposal{Txs: finalProposal}, nil
 }
 
 func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-	return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil
+	fmt.Println("entered processProp")
+	processedBanTxs := false
+	bannedUsers := make(map[string]struct{}, 0)
+	for _, tx := range processproposal.Txs {
+		var parsedBan model.BanTx
+		var parsedTx model.Message
+		err := json.Unmarshal(tx, &parsedBan)
+		if err != nil {
+			fmt.Println("No Ban in processProp")
+			_, err = model.ParseMessage(tx)
+			if err != nil {
+				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
+			}
+			processedBanTxs = true
+			if _, ok := bannedUsers[parsedTx.Sender]; ok {
+				// sending us a tx from a banned user
+				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
+			}
+
+		} else {
+			fmt.Println("Banned user found", string(tx))
+			if processedBanTxs {
+				// Banning transactions have to come first, cannot have them once we hit the first non user ban tx
+				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
+			}
+			bannedUsers[parsedBan.UserName] = struct{}{}
+		}
+	}
+	return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_ACCEPT}, nil
 }
 
 // Deliver the decided block with its txs to the Application
-func (app *ForumApp) FinalizeBlock(_ context.Context, finalizeblock *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	app.stagedTxs = make([][]byte, 0)
-	respTxs := make([]*abci.ExecTxResult, len(finalizeblock.Txs))
 
-	for i, tx := range finalizeblock.Txs {
-		msg, err := model.ParseMessage(tx)
+	fmt.Println("entered finalizeBlock")
+	// Iterate over Tx in current block
+
+	app.stagedTxs = make([][]byte, 0)
+
+	respTxs := make([]*types.ExecTxResult, len(req.Txs))
+	// processedBans := false
+	for i, tx := range req.Txs {
+
+		banTx := new(model.BanTx)
+		var msg *model.Message
+
+		err := json.Unmarshal(tx, &banTx)
 		if err != nil {
-			respTxs[i] = &abci.ExecTxResult{Code: 2}
-		} else {
-			app.stagedTxs = append(app.stagedTxs, tx)
-			err = model.AddMessage(app.DB, *msg)
+			fmt.Println("No bans:", err, " AND ", string(tx))
+			// processedBans = true
+			msg, err = model.ParseMessage(tx)
 			if err != nil {
-				respTxs[i] = &abci.ExecTxResult{Code: 1}
+				respTxs[i] = &types.ExecTxResult{Code: 2}
 			} else {
-				respTxs[i] = &abci.ExecTxResult{Code: 0}
+				app.stagedTxs = append(app.stagedTxs, tx)
+				err = model.AddMessage(app.DB, *msg)
+				if err != nil {
+					respTxs[i] = &types.ExecTxResult{Code: 1}
+				} else {
+					respTxs[i] = &types.ExecTxResult{Code: 0}
+				}
+			}
+		} else {
+			u, err := app.DB.FindUserByName(banTx.UserName)
+			if err == badger.ErrKeyNotFound {
+				newUser := model.User{
+					Name:      banTx.UserName,
+					PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
+					Moderator: false,
+					Banned:    true,
+				}
+				err := app.DB.CreateUser(&newUser)
+				if err != nil {
+					respTxs[i] = &types.ExecTxResult{Code: 1}
+				}
+				u = &newUser
+				respTxs[i] = &types.ExecTxResult{Code: 0}
+				continue
+			}
+			if err == nil {
+				u.Banned = true
+				err = app.DB.UpdateUser(*u)
+				respTxs[i] = &types.ExecTxResult{Code: 0}
+				if err != nil {
+					fmt.Println("Error updating user :", err)
+				}
+			} else {
+				respTxs[i] = &types.ExecTxResult{Code: 1}
 			}
 		}
-	}
 
+	}
 	response := &abci.ResponseFinalizeBlock{TxResults: respTxs}
 	return response, nil
 }
