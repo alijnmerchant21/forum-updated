@@ -78,8 +78,6 @@ func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.Respo
 // Query blockchain
 func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
 	resp := abci.ResponseQuery{Key: query.Data}
-
-	fmt.Println("Query path:", query.Path)
 	// Just testing whether validators are properly stored
 	if query.Path == "/val" {
 		for k := range app.valAddrToPubKeyMap {
@@ -144,11 +142,7 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 	if err == badger.ErrKeyNotFound {
 		fmt.Println("Not found user :", msg.Sender)
 	}
-	if u != nil {
-		fmt.Println(u)
-	}
 	if u != nil && u.Banned {
-		fmt.Println("User is banned")
 		return &types.ResponseCheckTx{Code: CodeTypeBanned, Log: "User is banned"}, nil
 	}
 	fmt.Println("Check tx success for ", msg.Message, " and ", msg.Sender)
@@ -221,7 +215,6 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 			if err != nil {
 				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
 			}
-			fmt.Println("Banned user found", string(tx))
 			if processedBanTxs {
 				// Banning transactions have to come first, cannot have them once we hit the first non user ban tx
 				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
@@ -230,7 +223,6 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 		} else {
 			_, err = model.ParseMessage(tx)
 			if err != nil {
-				fmt.Println(string(tx))
 				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
 			}
 			processedBanTxs = true
@@ -406,7 +398,6 @@ func (app *ForumApp) getWordsFromVe(voteExtensions []abci.ExtendedVoteInfo) stri
 		// Thus ensuring each validator only adds one word once
 
 		curseWords := strings.Split(string(vote.GetVoteExtension()), "|")
-		fmt.Println(string(vote.GetVoteExtension()))
 		for _, word := range curseWords {
 			if count, ok := curseWordMap[word]; !ok {
 				curseWordMap[word] = 1
