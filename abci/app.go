@@ -178,37 +178,7 @@ func (app ForumApp) InitChain(_ context.Context, req *abci.RequestInitChain) (*a
 func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 	fmt.Println("entered prepareProp")
 
-	voteExtensions := proposal.LocalLastCommit.Votes
-	curseWordMap := make(map[string]int)
-	for _, vote := range voteExtensions {
-
-		// This code gets the curse words and makes sure that we do not add them more than once
-		// Thus ensuring each validator only adds one word once
-
-		curseWords := strings.Split(string(vote.GetVoteExtension()), "|")
-		fmt.Println(string(vote.GetVoteExtension()))
-		for _, word := range curseWords {
-			if count, ok := curseWordMap[word]; !ok {
-				curseWordMap[word] = 1
-			} else {
-				curseWordMap[word] = count + 1
-			}
-		}
-
-	}
-	fmt.Println("Processed vote extensions :", curseWordMap)
-	majority := len(app.valAddrToPubKeyMap) / 3 // We define the majority to be at least 1/3 of the validators;
-
-	voteExtensionCurseWords := ""
-	for word, count := range curseWordMap {
-		if count > majority {
-			if voteExtensionCurseWords == "" {
-				voteExtensionCurseWords = word
-			} else {
-				voteExtensionCurseWords = voteExtensionCurseWords + "|" + word
-			}
-		}
-	}
+	voteExtensionCurseWords := app.getWordsFromVe(proposal.LocalLastCommit.Votes)
 
 	// prepare proposal puts the BanTx first, then adds the other transactions
 	// ProcessProposal should verify this
@@ -429,4 +399,39 @@ func (app ForumApp) VerifyVoteExtension(_ context.Context, req *abci.RequestVeri
 		return &abci.ResponseVerifyVoteExtension{Status: abci.ResponseVerifyVoteExtension_REJECT}, nil
 	}
 	return &abci.ResponseVerifyVoteExtension{Status: abci.ResponseVerifyVoteExtension_ACCEPT}, nil
+}
+
+func (app *ForumApp) getWordsFromVe(voteExtensions []abci.ExtendedVoteInfo) string {
+	curseWordMap := make(map[string]int)
+	for _, vote := range voteExtensions {
+
+		// This code gets the curse words and makes sure that we do not add them more than once
+		// Thus ensuring each validator only adds one word once
+
+		curseWords := strings.Split(string(vote.GetVoteExtension()), "|")
+		fmt.Println(string(vote.GetVoteExtension()))
+		for _, word := range curseWords {
+			if count, ok := curseWordMap[word]; !ok {
+				curseWordMap[word] = 1
+			} else {
+				curseWordMap[word] = count + 1
+			}
+		}
+
+	}
+	fmt.Println("Processed vote extensions :", curseWordMap)
+	majority := len(app.valAddrToPubKeyMap) / 3 // We define the majority to be at least 1/3 of the validators;
+
+	voteExtensionCurseWords := ""
+	for word, count := range curseWordMap {
+		if count > majority {
+			if voteExtensionCurseWords == "" {
+				voteExtensionCurseWords = word
+			} else {
+				voteExtensionCurseWords = voteExtensionCurseWords + "|" + word
+			}
+		}
+	}
+	return voteExtensionCurseWords
+
 }
