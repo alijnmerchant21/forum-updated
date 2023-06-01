@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/alijnmerchant21/forum-updated/model"
 
@@ -160,11 +161,23 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 	for _, tx := range processproposal.Txs {
 		var parsedBan model.BanTx
 		var parsedTx model.Message
-		err := json.Unmarshal(tx, &parsedBan)
-		if err != nil {
-			fmt.Println("No Ban in processProp")
+		var err error
+		if !processedBanTxs && isBanTx(tx) {
+			fmt.Println("FoundBanTx")
+			err = json.Unmarshal(tx, &parsedBan)
+			if err != nil {
+				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
+			}
+			fmt.Println("Banned user found", string(tx))
+			if processedBanTxs {
+				// Banning transactions have to come first, cannot have them once we hit the first non user ban tx
+				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
+			}
+			bannedUsers[parsedBan.UserName] = struct{}{}
+		} else {
 			_, err = model.ParseMessage(tx)
 			if err != nil {
+				fmt.Println(string(tx))
 				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
 			}
 			processedBanTxs = true
@@ -172,14 +185,6 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 				// sending us a tx from a banned user
 				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
 			}
-
-		} else {
-			fmt.Println("Banned user found", string(tx))
-			if processedBanTxs {
-				// Banning transactions have to come first, cannot have them once we hit the first non user ban tx
-				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
-			}
-			bannedUsers[parsedBan.UserName] = struct{}{}
 		}
 	}
 	return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_ACCEPT}, nil
@@ -194,13 +199,19 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 	app.stagedTxs = make([][]byte, 0)
 	respTxs := make([]*types.ExecTxResult, len(req.Txs))
 	for i, tx := range req.Txs {
+		var err error
+		//Check if it's a banning transaction
+		if isBanTx(tx) {
+			banTx := new(model.BanTx)
+			err = json.Unmarshal(tx, &banTx)
+			if err != nil {
+				respTxs[i] = &types.ExecTxResult{Code: 2}
+			} else {
+				respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
+				app.stagedBanTxs = append(app.stagedBanTxs, tx)
+			}
 
-		banTx := new(model.BanTx)
-		//Check if it's a banned transaction
-		err := json.Unmarshal(tx, &banTx)
-		if err != nil {
-			// If not try to parse the tx as a normal message
-			fmt.Println("No bans:", err, " AND ", string(tx))
+		} else {
 			_, err := model.ParseMessage(tx)
 			if err != nil {
 				respTxs[i] = &types.ExecTxResult{Code: 2}
@@ -209,9 +220,6 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 				// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
 				respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
 			}
-		} else {
-			respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
-			app.stagedBanTxs = append(app.stagedBanTxs, tx)
 		}
 	}
 	response := &abci.ResponseFinalizeBlock{TxResults: respTxs}
@@ -297,4 +305,8 @@ func (ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote
 
 func (ForumApp) VerifyVoteExtension(_ context.Context, verifyvoteextension *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
 	return &abci.ResponseVerifyVoteExtension{}, nil
+}
+
+func isBanTx(tx []byte) bool {
+	return strings.Contains(string(tx), "username")
 }
