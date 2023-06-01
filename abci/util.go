@@ -41,6 +41,12 @@ func (app *ForumApp) updateValidator(v types.ValidatorUpdate) {
 
 }
 
+func IsCurseWord(word string, curseWords string) bool {
+	// Define your list of curse words here
+	// For example:
+	return strings.Contains(curseWords, word)
+}
+
 const (
 	CodeTypeOK              uint32 = 0
 	CodeTypeEncodingError   uint32 = 1
