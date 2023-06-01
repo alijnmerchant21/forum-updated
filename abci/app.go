@@ -103,7 +103,7 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 	msg, err := model.ParseMessage(checktx.Tx)
 	if err != nil {
 		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
-		return &abci.ResponseCheckTx{Code: CodeTypeInvalidTxFormat}, err
+		return &abci.ResponseCheckTx{Code: CodeTypeInvalidTxFormat, Log: "Invalid transaction format"}, err
 	}
 	fmt.Println("Searching for sender ... ", msg.Sender)
 	u, err := app.DB.FindUserByName(msg.Sender)
@@ -121,7 +121,7 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 	}
 	if u != nil && u.Banned {
 		fmt.Println("User is banned")
-		return &types.ResponseCheckTx{Code: CodeTypeBanned}, nil
+		return &types.ResponseCheckTx{Code: CodeTypeBanned, Log: "User is banned"}, nil
 	}
 	fmt.Println("Check tx success for ", msg.Message, " and ", msg.Sender)
 	return &types.ResponseCheckTx{Code: CodeTypeOK}, nil
