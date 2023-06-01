@@ -17,7 +17,6 @@ type DB struct {
 
 func (db *DB) Init(database *badger.DB) {
 	db.db = database
-	//db.Set([]byte("history"), []byte("BEGIN:"))
 }
 
 func (db *DB) Commit() error {
@@ -77,7 +76,6 @@ func (db *DB) CreateUser(user *User) error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -89,8 +87,6 @@ func (db *DB) FindUserByName(name string) (*User, error) {
 		if err != nil {
 			return err
 		}
-		fmt.Println("PRTINTIN ", item.String())
-
 		err = item.Value(func(val []byte) error {
 			return json.Unmarshal(val, &user)
 		})
@@ -130,20 +126,6 @@ func ViewDB(db *badger.DB, key []byte) ([]byte, error) {
 		return nil, err
 	}
 	return value, nil
-}
-
-func (db *DB) UpdateUser(u User) error {
-	err := db.db.Update(func(txn *badger.Txn) error {
-		fmt.Println("Updating user ", u.Name)
-		userBytes, err := json.Marshal(u)
-		if err != nil {
-			return err
-		}
-		err = txn.Set([]byte(u.Name), userBytes)
-		return err
-
-	})
-	return err
 }
 
 func (db *DB) Close() error {

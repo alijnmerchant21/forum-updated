@@ -12,7 +12,6 @@ import (
 
 	"github.com/cometbft/cometbft/abci/types"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/crypto/ed25519"
 	cryptoencoding "github.com/cometbft/cometbft/crypto/encoding"
 	cryptoproto "github.com/cometbft/cometbft/proto/tendermint/crypto"
 
@@ -26,9 +25,8 @@ type ForumApp struct {
 	abci.BaseApplication
 	valAddrToPubKeyMap map[string]cryptoproto.PublicKey
 	CurseWords         string
-	stagedTxs          [][]byte
-	stagedBanTxs       [][]byte
 	state              AppState
+	onGoingBlock       *badger.Txn
 }
 
 func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
@@ -45,8 +43,6 @@ func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
 	}
 	return &ForumApp{
 		state:              loadState(db),
-		stagedTxs:          make([][]byte, 0),
-		stagedBanTxs:       make([][]byte, 0),
 		valAddrToPubKeyMap: make(map[string]cryptoproto.PublicKey),
 		CurseWords:         cfg.CurseWords,
 	}, nil
@@ -239,8 +235,7 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	fmt.Println("entered finalizeBlock")
 	// Iterate over Tx in current block
-	app.stagedBanTxs = make([][]byte, 0)
-	app.stagedTxs = make([][]byte, 0)
+	app.onGoingBlock = app.state.DB.GetDB().NewTransaction(true)
 	respTxs := make([]*types.ExecTxResult, len(req.Txs))
 	processedBanTxs := false
 	for i, tx := range req.Txs {
@@ -252,19 +247,39 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			if err != nil {
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
 			} else {
+				err := UpdateOrSetUser(app.state.DB, banTx.UserName, true, app.onGoingBlock)
+				if err != nil {
+					panic(err)
+				}
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeOK}
 				app.state.Size++
-				app.stagedBanTxs = append(app.stagedBanTxs, tx)
+				// app.stagedBanTxs = append(app.stagedBanTxs, tx)
 			}
 
 		} else {
 			// There should never be a ban transaction after other txs
 			processedBanTxs = true
-			_, err := model.ParseMessage(tx)
+			msg, err := model.ParseMessage(tx)
 			if err != nil {
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
 			} else {
-				app.stagedTxs = append(app.stagedTxs, tx)
+				// Check if this sender already existed; if not, add the user too
+				err := UpdateOrSetUser(app.state.DB, msg.Sender, false, app.onGoingBlock)
+				if err != nil {
+					panic(err)
+				}
+				// Add the message for this sender
+				message, err := model.AppendToExistingMsgs(app.state.DB, *msg)
+				if err != nil {
+					return nil, err
+				}
+				app.onGoingBlock.Set([]byte(msg.Sender+"msg"), []byte(message))
+				chatHistory, err := model.AppendToChat(app.state.DB, *msg)
+				if err != nil {
+					panic(err)
+				}
+				// Append messages to chat history
+				app.onGoingBlock.Set([]byte("history"), []byte(chatHistory))
 				// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
 				respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
 				app.state.Size++
@@ -283,67 +298,10 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 // For details on why it has to be done here, check the Crash recovery section
 // of the ABCI spec
 func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci.ResponseCommit, error) {
-	banTx := new(model.BanTx)
-	for _, tx := range app.stagedBanTxs {
-		err := json.Unmarshal(tx, &banTx)
-		if err != nil {
-			return nil, err
-		}
-		u, err := app.state.DB.FindUserByName(banTx.UserName)
-		if err == nil {
-			u.Banned = true
-			err = app.state.DB.UpdateUser(*u)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				newUser := model.User{
-					Name:      banTx.UserName,
-					PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
-					Moderator: false,
-					Banned:    true,
-				}
-				err := app.state.DB.CreateUser(&newUser)
-				if err != nil {
-					return nil, err
-				}
-				u = &newUser
-			} else {
-				return nil, err
-			}
-		}
-
+	if err := app.onGoingBlock.Commit(); err != nil {
+		panic(err)
 	}
-
-	for _, tx := range app.stagedTxs {
-		msg, err := model.ParseMessage(tx)
-		if err != nil {
-			return nil, err
-		} else {
-			_, err := app.state.DB.FindUserByName(msg.Sender)
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				newUser := model.User{
-					Name:      msg.Sender,
-					PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
-					Moderator: false,
-					Banned:    false,
-				}
-				err := app.state.DB.CreateUser(&newUser)
-				if err != nil {
-					return nil, err
-				}
-			}
-			err = model.AddMessage(app.state.DB, *msg)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
 	saveState(&app.state)
-
-	app.state.DB.GetDB().Sync()
 	return &abci.ResponseCommit{}, nil
 }
 
@@ -375,7 +333,7 @@ func (app ForumApp) VerifyVoteExtension(_ context.Context, req *abci.RequestVeri
 	fmt.Println("Entered verify extension") // Will not be called for extensions generated by this validator
 	if _, ok := app.valAddrToPubKeyMap[string(req.ValidatorAddress)]; !ok {
 		// we do not have a validator with this address mapped; this should never happen
-		panic(fmt.Errorf("Unknown validator"))
+		panic(fmt.Errorf("unknown validator"))
 	}
 	curseWords := strings.Split(string(req.VoteExtension), "|")
 	tmpCurseWordMap := make(map[string]struct{})

@@ -22,24 +22,15 @@ type MsgHistory struct {
 	Msg string `json:"history"`
 }
 
-func AppendHistory(db *DB, message Message) error {
+func AppendToChat(db *DB, message Message) (string, error) {
 	historyBytes, err := ViewDB(db.GetDB(), []byte("history"))
 	if err != nil {
 		fmt.Println("Error fething historu:", err)
-		return err
+		return "", err
 	}
 	msgBytes := string(historyBytes)
 	msgBytes = msgBytes + "{sender:" + message.Sender + ",message:" + message.Message + "}"
-	if err != nil {
-		fmt.Println("erro appending mssg to history: ", err)
-	}
-
-	fmt.Println("Appending message to history")
-	err = db.Set([]byte("history"), []byte(msgBytes))
-	if err != nil {
-		fmt.Println("Error updating history:", err)
-	}
-	return err
+	return msgBytes, nil
 }
 
 func FetchHistory(db *DB) (string, error) {
@@ -56,29 +47,15 @@ func FetchHistory(db *DB) (string, error) {
 	return msgHistory, err
 }
 
-// AddMessage adds a message to the database
-// AddMessage uses string
-// To be changed to array later
-func AddMessage(db *DB, message Message) error {
-	// Get the existing messages for the sender
+func AppendToExistingMsgs(db *DB, message Message) (string, error) {
 	existingMessages, err := GetMessagesBySender(db, message.Sender)
 	if err != nil && err != badger.ErrKeyNotFound {
-		return err
+		return "", err
 	}
-
-	// Append the new message to the string
-	fmt.Println("existing Pre :", existingMessages)
-	existingMessages = existingMessages + ";" + message.Message
-	fmt.Println("existing Post :", existingMessages)
-	// Store the updated string in the Badger database
-	err = db.db.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(message.Sender+"msg"), []byte(existingMessages))
-	})
-	if err != nil {
-		return err
+	if err == badger.ErrKeyNotFound {
+		return message.Message, nil
 	}
-	err = AppendHistory(db, message)
-	return err
+	return existingMessages + ";" + existingMessages, nil
 }
 
 // GetMessagesBySender retrieves all messages sent by a specific sender

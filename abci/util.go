@@ -2,11 +2,16 @@ package forum
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/alijnmerchant21/forum-updated/model"
 	"github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/crypto/ed25519"
 	cryptoencoding "github.com/cometbft/cometbft/crypto/encoding"
+	"github.com/dgraph-io/badger/v3"
 )
 
 func isBanTx(tx []byte) bool {
@@ -53,3 +58,28 @@ const (
 	CodeTypeInvalidTxFormat uint32 = 2
 	CodeTypeBanned          uint32 = 3
 )
+
+func UpdateOrSetUser(db *model.DB, uname string, toBan bool, txn *badger.Txn) error {
+	var u *model.User
+	u, err := db.FindUserByName(uname)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		u = new(model.User)
+		u.Name = uname
+		u.PubKey = ed25519.GenPrivKey().PubKey().Bytes()
+		u.Banned = toBan
+	} else {
+		if err == nil {
+			u.Banned = toBan
+		} else {
+			err = fmt.Errorf("not able to process user")
+			return err
+		}
+	}
+	userBytes, err := json.Marshal(u)
+	if err != nil {
+		fmt.Println("Error marshalling user")
+		return err
+	}
+	return txn.Set([]byte(uname), userBytes)
+
+}
