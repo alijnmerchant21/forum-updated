@@ -205,8 +205,17 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 		}
 
 	}
-
 	fmt.Println("Processed vote extensions :", curseWordMap)
+	// TODO Sort the map by value and take only the once with majority
+	majority := len(app.valAddrToPubKeyMap) / 2 // We define the majority to be at least half of the validators
+
+	voteExtensionCurseWords := ""
+	for word, count := range curseWordMap {
+		if count > majority {
+			voteExtensionCurseWords = voteExtensionCurseWords + "|" + word
+		}
+	}
+
 	// prepare proposal puts the BanTx first, then adds the other transactions
 	// ProcessProposal should verify this
 	proposedTxs := make([][]byte, 0)
@@ -216,10 +225,12 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 		msg, err := model.ParseMessage(tx)
 		if err == nil {
 			curseWords, err := app.DB.GetCurseWords()
+
 			if err != nil {
 				proposedTxs = append(proposedTxs, tx)
 			}
-			if !model.IsCurseWord(msg.Message, curseWords) {
+			// Adding the curse words from vote extensions too
+			if !model.IsCurseWord(msg.Message, curseWords+voteExtensionCurseWords) {
 				proposedTxs = append(proposedTxs, tx)
 			} else {
 				banTx := model.BanTx{UserName: msg.Sender}
