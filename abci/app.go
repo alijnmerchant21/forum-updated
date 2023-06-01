@@ -1,6 +1,7 @@
 package forum
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,10 +9,13 @@ import (
 	"strings"
 
 	"github.com/alijnmerchant21/forum-updated/model"
-
 	"github.com/cometbft/cometbft/abci/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/ed25519"
+	cryptoencoding "github.com/cometbft/cometbft/crypto/encoding"
+	cryptoproto "github.com/cometbft/cometbft/proto/tendermint/crypto"
+
+	"github.com/cometbft/cometbft/version"
 	"github.com/dgraph-io/badger/v3"
 )
 
@@ -22,11 +26,15 @@ const (
 	CodeTypeBanned          uint32 = 3
 )
 
+const ApplicationVersion = 1
+
 type ForumApp struct {
 	abci.BaseApplication
-	User *model.User
-	DB   *model.DB
-	Msg  *model.Message
+	User               *model.User
+	DB                 *model.DB
+	Msg                *model.Message
+	Height             int64
+	valAddrToPubKeyMap map[string]cryptoproto.PublicKey
 
 	stagedTxs    [][]byte
 	stagedBanTxs [][]byte
@@ -43,22 +51,46 @@ func NewForumApp(dbDir string) (*ForumApp, error) {
 	//db := &model.DB{}
 
 	return &ForumApp{
-		User:         user,
-		DB:           db,
-		stagedTxs:    make([][]byte, 0),
-		stagedBanTxs: make([][]byte, 0),
+		User:               user,
+		DB:                 db,
+		stagedTxs:          make([][]byte, 0),
+		stagedBanTxs:       make([][]byte, 0),
+		valAddrToPubKeyMap: make(map[string]cryptoproto.PublicKey),
 	}, nil
 }
 
 // Return application info
-func (ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseInfo, error) {
-	return &abci.ResponseInfo{}, nil
+func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseInfo, error) {
+	if len(app.valAddrToPubKeyMap) == 0 && app.Height > 0 {
+		validators := app.getValidators()
+		for _, v := range validators {
+			pubkey, err := cryptoencoding.PubKeyFromProto(v.PubKey)
+			if err != nil {
+				panic(fmt.Errorf("can't decode public key: %w", err))
+			}
+			app.valAddrToPubKeyMap[string(pubkey.Address())] = v.PubKey
+		}
+	}
+	return &abci.ResponseInfo{
+		Version:         version.ABCIVersion,
+		AppVersion:      ApplicationVersion,
+		LastBlockHeight: app.Height,
+	}, nil
 }
 
 // Query blockchain
 func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
 	resp := abci.ResponseQuery{Key: query.Data}
 
+	// Just testing whether validators are properly stored
+	if query.Path == "/val" {
+		for k := range app.valAddrToPubKeyMap {
+			return &types.ResponseQuery{
+				Key:   query.Data,
+				Value: []byte(string(k)),
+			}, nil
+		}
+	}
 	// Parse sender from query data
 	sender := string(query.Data)
 
@@ -129,7 +161,10 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 
 // Consensus Connection
 // Initialize blockchain w validators/other info from CometBFT
-func (ForumApp) InitChain(_ context.Context, initchain *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
+func (app ForumApp) InitChain(_ context.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
+	for _, v := range req.Validators {
+		app.updateValidator(v)
+	}
 	return &abci.ResponseInitChain{}, nil
 }
 
@@ -234,6 +269,7 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			}
 		}
 	}
+	app.Height = req.Height
 	response := &abci.ResponseFinalizeBlock{TxResults: respTxs}
 	return response, nil
 }
@@ -327,6 +363,7 @@ func (ForumApp) ApplySnapshotChunk(_ context.Context, applysnapshotchunk *abci.R
 }
 
 func (ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote) (*abci.ResponseExtendVote, error) {
+
 	return &abci.ResponseExtendVote{}, nil
 }
 
@@ -336,4 +373,32 @@ func (ForumApp) VerifyVoteExtension(_ context.Context, verifyvoteextension *abci
 
 func isBanTx(tx []byte) bool {
 	return strings.Contains(string(tx), "username")
+}
+
+func (app *ForumApp) updateValidator(v types.ValidatorUpdate) {
+	pubkey, err := cryptoencoding.PubKeyFromProto(v.PubKey)
+	if err != nil {
+		panic(fmt.Errorf("can't decode public key: %w", err))
+	}
+	key := []byte("val" + string(pubkey.Bytes()))
+
+	// add or update validator
+	value := bytes.NewBuffer(make([]byte, 0))
+	if err := types.WriteMessage(&v, value); err != nil {
+		panic(err)
+	}
+	if err = app.DB.Set(key, value.Bytes()); err != nil {
+		panic(err)
+	}
+	app.valAddrToPubKeyMap[string(pubkey.Address())] = v.PubKey
+
+}
+
+func (app *ForumApp) getValidators() (validators []types.ValidatorUpdate) {
+
+	err := app.DB.GetValidators(validators)
+	if err != nil {
+		panic(err)
+	}
+	return
 }
