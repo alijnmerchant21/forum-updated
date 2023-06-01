@@ -50,7 +50,8 @@ func main() {
 	defer db.Close()
 
 	dbPath := "forum-db"
-	app, err := forum.NewForumApp(dbPath)
+	appConfigPath := "app.toml"
+	app, err := forum.NewForumApp(dbPath, appConfigPath)
 
 	if err != nil {
 		log.Fatalf("failed to create ForumApp instance: %v", err)

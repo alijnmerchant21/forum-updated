@@ -3,12 +3,14 @@ package forum
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/alijnmerchant21/forum-updated/model"
+
 	"github.com/cometbft/cometbft/abci/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/ed25519"
@@ -31,16 +33,16 @@ const ApplicationVersion = 1
 type ForumApp struct {
 	abci.BaseApplication
 	User               *model.User
-	DB                 *model.DB
 	Msg                *model.Message
-	Height             int64
 	valAddrToPubKeyMap map[string]cryptoproto.PublicKey
-
-	stagedTxs    [][]byte
-	stagedBanTxs [][]byte
+	CurseWords         string
+	stagedTxs          [][]byte
+	stagedBanTxs       [][]byte
+	state              AppState
 }
 
-func NewForumApp(dbDir string) (*ForumApp, error) {
+func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
+
 	db, err := model.NewDB(dbDir)
 	if err != nil {
 		fmt.Printf("Error initializing database: %s\n", err)
@@ -49,19 +51,27 @@ func NewForumApp(dbDir string) (*ForumApp, error) {
 
 	user := &model.User{}
 	//db := &model.DB{}
-
+	cfg, err := LoadConfig(appConfigPath)
+	if err != nil {
+		cfg = new(Config)
+		cfg.CurseWords = "bad"
+	}
+	appState := new(AppState)
+	appState.DB = db
 	return &ForumApp{
 		User:               user,
-		DB:                 db,
+		state:              *appState,
 		stagedTxs:          make([][]byte, 0),
 		stagedBanTxs:       make([][]byte, 0),
 		valAddrToPubKeyMap: make(map[string]cryptoproto.PublicKey),
+		CurseWords:         cfg.CurseWords,
 	}, nil
+
 }
 
 // Return application info
 func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseInfo, error) {
-	if len(app.valAddrToPubKeyMap) == 0 && app.Height > 0 {
+	if len(app.valAddrToPubKeyMap) == 0 && app.state.Height > 0 {
 		validators := app.getValidators()
 		for _, v := range validators {
 			pubkey, err := cryptoencoding.PubKeyFromProto(v.PubKey)
@@ -74,7 +84,9 @@ func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.Respo
 	return &abci.ResponseInfo{
 		Version:         version.ABCIVersion,
 		AppVersion:      ApplicationVersion,
-		LastBlockHeight: app.Height,
+		LastBlockHeight: app.state.Height,
+
+		LastBlockAppHash: app.state.Hash(),
 	}, nil
 }
 
@@ -95,7 +107,7 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 	sender := string(query.Data)
 
 	if sender == "history" {
-		messages, err := model.FetchHistory(app.DB)
+		messages, err := model.FetchHistory(app.state.DB)
 		if err != nil {
 			fmt.Println("Error fetching history")
 			return nil, err
@@ -110,7 +122,7 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 		return &resp, nil
 	}
 	// Retrieve all message sent by the sender
-	messages, err := model.GetMessagesBySender(app.DB, sender)
+	messages, err := model.GetMessagesBySender(app.state.DB, sender)
 	if err != nil {
 		fmt.Println("Error in query1")
 		return nil, err
@@ -138,7 +150,7 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 		return &abci.ResponseCheckTx{Code: CodeTypeInvalidTxFormat, Log: "Invalid transaction format"}, err
 	}
 	fmt.Println("Searching for sender ... ", msg.Sender)
-	u, err := app.DB.FindUserByName(msg.Sender)
+	u, err := app.state.DB.FindUserByName(msg.Sender)
 
 	if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 		fmt.Println("problem in check tx: ", string(checktx.Tx))
@@ -165,15 +177,10 @@ func (app ForumApp) InitChain(_ context.Context, req *abci.RequestInitChain) (*a
 	for _, v := range req.Validators {
 		app.updateValidator(v)
 	}
-	CurseWords := []string{"bad", "rain", "cry", "never"}
-	for _, curseWord := range CurseWords {
-		err := app.DB.AddCurseWords(curseWord)
-		if err != nil {
-			return &abci.ResponseInitChain{}, err
-		}
-	}
+	appHash := make([]byte, 8)
+	binary.PutVarint(appHash, app.state.Size)
 	req.ConsensusParams.Abci.VoteExtensionsEnableHeight = 1
-	return &abci.ResponseInitChain{ConsensusParams: req.ConsensusParams}, nil
+	return &abci.ResponseInitChain{ConsensusParams: req.ConsensusParams, AppHash: appHash}, nil
 }
 
 func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
@@ -313,8 +320,9 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			}
 		}
 	}
-	app.Height = req.Height
-	response := &abci.ResponseFinalizeBlock{TxResults: respTxs}
+	app.state.Height = req.Height
+	app.state.Size++
+	response := &abci.ResponseFinalizeBlock{TxResults: respTxs, AppHash: app.state.Hash()}
 	return response, nil
 }
 
@@ -329,10 +337,10 @@ func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci
 		if err != nil {
 			return nil, err
 		}
-		u, err := app.DB.FindUserByName(banTx.UserName)
+		u, err := app.state.DB.FindUserByName(banTx.UserName)
 		if err == nil {
 			u.Banned = true
-			err = app.DB.UpdateUser(*u)
+			err = app.state.DB.UpdateUser(*u)
 			if err != nil {
 				fmt.Println("Error updating user :", err)
 				return nil, err
@@ -346,7 +354,7 @@ func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci
 					Moderator: false,
 					Banned:    true,
 				}
-				err := app.DB.CreateUser(&newUser)
+				err := app.state.DB.CreateUser(&newUser)
 				if err != nil {
 					return nil, err
 				}
@@ -364,7 +372,7 @@ func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci
 		if err != nil {
 			return nil, err
 		} else {
-			_, err := app.DB.FindUserByName(msg.Sender)
+			_, err := app.state.DB.FindUserByName(msg.Sender)
 			if errors.Is(err, badger.ErrKeyNotFound) {
 				newUser := model.User{
 					Name:      msg.Sender,
@@ -372,19 +380,19 @@ func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci
 					Moderator: false,
 					Banned:    false,
 				}
-				err := app.DB.CreateUser(&newUser)
+				err := app.state.DB.CreateUser(&newUser)
 				if err != nil {
 					return nil, err
 				}
 			}
-			err = model.AddMessage(app.DB, *msg)
+			err = model.AddMessage(app.state.DB, *msg)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	app.DB.GetDB().Sync()
+	app.state.DB.GetDB().Sync()
 	return &abci.ResponseCommit{}, nil
 }
 
@@ -408,13 +416,8 @@ func (ForumApp) ApplySnapshotChunk(_ context.Context, applysnapshotchunk *abci.R
 
 func (app ForumApp) ExtendVote(_ context.Context, extendvote *abci.RequestExtendVote) (*abci.ResponseExtendVote, error) {
 	fmt.Println("Entered extend vote")
-	curseWords, err := app.DB.GetCurseWords()
-	if err != nil {
-		fmt.Println("Failed to extend vote")
-		return &abci.ResponseExtendVote{}, nil
-	}
 
-	return &abci.ResponseExtendVote{VoteExtension: []byte(curseWords)}, nil
+	return &abci.ResponseExtendVote{VoteExtension: []byte(app.CurseWords)}, nil
 }
 
 func (app ForumApp) VerifyVoteExtension(_ context.Context, req *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
@@ -452,7 +455,7 @@ func (app *ForumApp) updateValidator(v types.ValidatorUpdate) {
 	if err := types.WriteMessage(&v, value); err != nil {
 		panic(err)
 	}
-	if err = app.DB.Set(key, value.Bytes()); err != nil {
+	if err = app.state.DB.Set(key, value.Bytes()); err != nil {
 		panic(err)
 	}
 	app.valAddrToPubKeyMap[string(pubkey.Address())] = v.PubKey
@@ -461,7 +464,7 @@ func (app *ForumApp) updateValidator(v types.ValidatorUpdate) {
 
 func (app *ForumApp) getValidators() (validators []types.ValidatorUpdate) {
 
-	err := app.DB.GetValidators(validators)
+	err := app.state.DB.GetValidators(validators)
 	if err != nil {
 		panic(err)
 	}
