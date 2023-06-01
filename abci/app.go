@@ -1,7 +1,6 @@
 package forum
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -25,8 +24,6 @@ const ApplicationVersion = 1
 
 type ForumApp struct {
 	abci.BaseApplication
-	User               *model.User
-	Msg                *model.Message
 	valAddrToPubKeyMap map[string]cryptoproto.PublicKey
 	CurseWords         string
 	stagedTxs          [][]byte
@@ -42,7 +39,6 @@ func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
 		return nil, err
 	}
 
-	user := &model.User{}
 	//db := &model.DB{}
 	cfg, err := LoadConfig(appConfigPath)
 	if err != nil {
@@ -50,7 +46,6 @@ func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
 		cfg.CurseWords = "bad"
 	}
 	return &ForumApp{
-		User:               user,
 		state:              loadState(db),
 		stagedTxs:          make([][]byte, 0),
 		stagedBanTxs:       make([][]byte, 0),
@@ -439,25 +434,5 @@ func (app *ForumApp) getWordsFromVe(voteExtensions []abci.ExtendedVoteInfo) stri
 		}
 	}
 	return voteExtensionCurseWords
-
-}
-
-func (app *ForumApp) updateValidator(v types.ValidatorUpdate) {
-	pubkey, err := cryptoencoding.PubKeyFromProto(v.PubKey)
-	if err != nil {
-		panic(fmt.Errorf("can't decode public key: %w", err))
-	}
-	key := []byte("val" + string(pubkey.Bytes()))
-
-	// add or update validator
-	value := bytes.NewBuffer(make([]byte, 0))
-	if err := types.WriteMessage(&v, value); err != nil {
-		panic(err)
-	}
-	if err = app.state.DB.Set(key, value.Bytes()); err != nil {
-		panic(err)
-	}
-
-	fmt.Println("Added validators")
 
 }

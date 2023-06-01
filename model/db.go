@@ -151,10 +151,12 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) Get(key []byte) ([]byte, error) {
+
 	return ViewDB(db.db, key)
+
 }
-func (db *DB) GetValidators(validators []types.ValidatorUpdate) error {
-	err := db.db.View(func(txn *badger.Txn) error {
+func (db *DB) GetValidators() (validators []types.ValidatorUpdate, err error) {
+	err = db.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchSize = 10
 		it := txn.NewIterator(opts)
@@ -164,9 +166,9 @@ func (db *DB) GetValidators(validators []types.ValidatorUpdate) error {
 			item := it.Item()
 			k := item.Key()
 			if isValidatorTx(k) {
-				err = item.Value(func(v []byte) error {
+				err := item.Value(func(v []byte) error {
 					validator := new(types.ValidatorUpdate)
-					err := types.ReadMessage(bytes.NewBuffer(v), validator)
+					err = types.ReadMessage(bytes.NewBuffer(v), validator)
 					validators = append(validators, *validator)
 					return err
 				})
@@ -177,7 +179,7 @@ func (db *DB) GetValidators(validators []types.ValidatorUpdate) error {
 		}
 		return nil
 	})
-	return err
+	return
 }
 func isValidatorTx(tx []byte) bool {
 	return strings.HasPrefix(string(tx), "val")
