@@ -17,7 +17,7 @@ type DB struct {
 
 func (db *DB) Init(database *badger.DB) {
 	db.db = database
-	db.Set([]byte("history"), []byte("BEGIN:"))
+	//db.Set([]byte("history"), []byte("BEGIN:"))
 }
 
 func (db *DB) Commit() error {
@@ -27,6 +27,7 @@ func (db *DB) Commit() error {
 }
 
 func NewDB(dbPath string) (*DB, error) {
+	fmt.Println("New DB")
 	// Open badger DB
 	opts := badger.DefaultOptions(dbPath)
 	db, err := badger.Open(opts)
@@ -149,6 +150,9 @@ func (db *DB) Close() error {
 	return db.db.Close()
 }
 
+func (db *DB) Get(key []byte) ([]byte, error) {
+	return ViewDB(db.db, key)
+}
 func (db *DB) GetValidators(validators []types.ValidatorUpdate) error {
 	err := db.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions

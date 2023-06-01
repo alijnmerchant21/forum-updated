@@ -1,6 +1,7 @@
 package forum
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -48,11 +49,9 @@ func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
 		cfg = new(Config)
 		cfg.CurseWords = "bad"
 	}
-	appState := new(AppState)
-	appState.DB = db
 	return &ForumApp{
 		User:               user,
-		state:              *appState,
+		state:              loadState(db),
 		stagedTxs:          make([][]byte, 0),
 		stagedBanTxs:       make([][]byte, 0),
 		valAddrToPubKeyMap: make(map[string]cryptoproto.PublicKey),
@@ -63,6 +62,7 @@ func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
 
 // Return application info
 func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseInfo, error) {
+
 	if len(app.valAddrToPubKeyMap) == 0 && app.state.Height > 0 {
 		validators := app.getValidators()
 		for _, v := range validators {
@@ -86,6 +86,7 @@ func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.Respo
 func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
 	resp := abci.ResponseQuery{Key: query.Data}
 
+	fmt.Println("Query path:", query.Path)
 	// Just testing whether validators are properly stored
 	if query.Path == "/val" {
 		for k := range app.valAddrToPubKeyMap {
@@ -94,6 +95,7 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 				Value: []byte(string(k)),
 			}, nil
 		}
+		return &types.ResponseQuery{}, nil
 	}
 	// Parse sender from query data
 	sender := string(query.Data)
@@ -116,14 +118,14 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 	// Retrieve all message sent by the sender
 	messages, err := model.GetMessagesBySender(app.state.DB, sender)
 	if err != nil {
-		fmt.Println("Error in query1")
+		fmt.Println("Error in query1", err)
 		return nil, err
 	}
 
 	// Convert the messages to JSON and return as query result
 	resultBytes, err := json.Marshal(messages)
 	if err != nil {
-		fmt.Println("Error in query")
+		fmt.Println("Error in query", err)
 		return nil, err
 	}
 
@@ -134,7 +136,6 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 }
 
 func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
-
 	// Parse the tx message
 	msg, err := model.ParseMessage(checktx.Tx)
 	if err != nil {
@@ -268,6 +269,7 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
 			} else {
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeOK}
+				app.state.Size++
 				app.stagedBanTxs = append(app.stagedBanTxs, tx)
 			}
 
@@ -279,11 +281,13 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 				app.stagedTxs = append(app.stagedTxs, tx)
 				// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
 				respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
+				app.state.Size++
 			}
 		}
+
 	}
 	app.state.Height = req.Height
-	app.state.Size++
+
 	response := &abci.ResponseFinalizeBlock{TxResults: respTxs, AppHash: app.state.Hash()}
 	return response, nil
 }
@@ -353,6 +357,8 @@ func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci
 			}
 		}
 	}
+
+	saveState(&app.state)
 
 	app.state.DB.GetDB().Sync()
 	return &abci.ResponseCommit{}, nil
@@ -433,5 +439,25 @@ func (app *ForumApp) getWordsFromVe(voteExtensions []abci.ExtendedVoteInfo) stri
 		}
 	}
 	return voteExtensionCurseWords
+
+}
+
+func (app *ForumApp) updateValidator(v types.ValidatorUpdate) {
+	pubkey, err := cryptoencoding.PubKeyFromProto(v.PubKey)
+	if err != nil {
+		panic(fmt.Errorf("can't decode public key: %w", err))
+	}
+	key := []byte("val" + string(pubkey.Bytes()))
+
+	// add or update validator
+	value := bytes.NewBuffer(make([]byte, 0))
+	if err := types.WriteMessage(&v, value); err != nil {
+		panic(err)
+	}
+	if err = app.state.DB.Set(key, value.Bytes()); err != nil {
+		panic(err)
+	}
+
+	fmt.Println("Added validators")
 
 }
