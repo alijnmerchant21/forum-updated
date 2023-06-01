@@ -15,6 +15,13 @@ import (
 	"github.com/dgraph-io/badger/v3"
 )
 
+const (
+	CodeTypeOK              uint32 = 0
+	CodeTypeEncodingError   uint32 = 1
+	CodeTypeInvalidTxFormat uint32 = 2
+	CodeTypeBanned          uint32 = 3
+)
+
 type ForumApp struct {
 	abci.BaseApplication
 	User *model.User
@@ -96,22 +103,28 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 	msg, err := model.ParseMessage(checktx.Tx)
 	if err != nil {
 		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
-		return &abci.ResponseCheckTx{Code: 1}, err
+		return &abci.ResponseCheckTx{Code: CodeTypeInvalidTxFormat}, err
 	}
 	fmt.Println("Searching for sender ... ", msg.Sender)
 	u, err := app.DB.FindUserByName(msg.Sender)
 
 	if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 		fmt.Println("problem in check tx: ", string(checktx.Tx))
-		return &types.ResponseCheckTx{Code: 1}, err
+		return &types.ResponseCheckTx{Code: CodeTypeEncodingError}, nil
 	}
 
+	if err == badger.ErrKeyNotFound {
+		fmt.Println("Not found user :", msg.Sender)
+	}
+	if u != nil {
+		fmt.Println(u)
+	}
 	if u != nil && u.Banned {
-		err = fmt.Errorf("user is banned")
-		return &types.ResponseCheckTx{Code: 1}, err
+		fmt.Println("User is banned")
+		return &types.ResponseCheckTx{Code: CodeTypeBanned}, nil
 	}
 	fmt.Println("Check tx success for ", msg.Message, " and ", msg.Sender)
-	return &types.ResponseCheckTx{Code: 0}, nil
+	return &types.ResponseCheckTx{Code: CodeTypeOK}, nil
 }
 
 // Consensus Connection
@@ -194,7 +207,6 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	fmt.Println("entered finalizeBlock")
 	// Iterate over Tx in current block
-
 	app.stagedBanTxs = make([][]byte, 0)
 	app.stagedTxs = make([][]byte, 0)
 	respTxs := make([]*types.ExecTxResult, len(req.Txs))
@@ -205,16 +217,16 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			banTx := new(model.BanTx)
 			err = json.Unmarshal(tx, &banTx)
 			if err != nil {
-				respTxs[i] = &types.ExecTxResult{Code: 2}
+				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
 			} else {
-				respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
+				respTxs[i] = &types.ExecTxResult{Code: CodeTypeOK}
 				app.stagedBanTxs = append(app.stagedBanTxs, tx)
 			}
 
 		} else {
 			_, err := model.ParseMessage(tx)
 			if err != nil {
-				respTxs[i] = &types.ExecTxResult{Code: 2}
+				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
 			} else {
 				app.stagedTxs = append(app.stagedTxs, tx)
 				// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
@@ -238,38 +250,53 @@ func (app ForumApp) Commit(_ context.Context, commit *abci.RequestCommit) (*abci
 			return nil, err
 		}
 		u, err := app.DB.FindUserByName(banTx.UserName)
-		if err == badger.ErrKeyNotFound {
-			newUser := model.User{
-				Name:      banTx.UserName,
-				PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
-				Moderator: false,
-				Banned:    true,
-			}
-			err := app.DB.CreateUser(&newUser)
-			if err != nil {
-				return nil, err
-			}
-			u = &newUser
-			continue
-		}
 		if err == nil {
 			u.Banned = true
 			err = app.DB.UpdateUser(*u)
-			fmt.Println("Error updating user :", err)
-
+			if err != nil {
+				fmt.Println("Error updating user :", err)
+				return nil, err
+			}
 		} else {
-			return nil, err
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				fmt.Println("User is not found, creating it ")
+				newUser := model.User{
+					Name:      banTx.UserName,
+					PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
+					Moderator: false,
+					Banned:    true,
+				}
+				err := app.DB.CreateUser(&newUser)
+				if err != nil {
+					return nil, err
+				}
+				u = &newUser
+			} else {
+				return nil, err
+			}
 		}
 
 	}
 	fmt.Println("Commit banned txs succeeded")
 
 	for _, tx := range app.stagedTxs {
-		fmt.Println("Committing ", string(tx))
 		msg, err := model.ParseMessage(tx)
 		if err != nil {
 			return nil, err
 		} else {
+			_, err := app.DB.FindUserByName(msg.Sender)
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				newUser := model.User{
+					Name:      msg.Sender,
+					PubKey:    ed25519.GenPrivKey().PubKey().Bytes(),
+					Moderator: false,
+					Banned:    false,
+				}
+				err := app.DB.CreateUser(&newUser)
+				if err != nil {
+					return nil, err
+				}
+			}
 			err = model.AddMessage(app.DB, *msg)
 			if err != nil {
 				return nil, err
