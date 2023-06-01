@@ -190,9 +190,11 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 
 		// This code gets the curse words and makes sure that we do not add them more than once
 		// Thus ensuring each validator only adds one word once
+
 		tmpCurseWordMap := make(map[string]struct{})
 		curseWords := strings.Split(string(vote.GetVoteExtension()), "|")
 
+		// TODO This should be moved to verify vote extension so we don't do it here
 		for _, word := range curseWords {
 			tmpCurseWordMap[word] = struct{}{}
 		}
@@ -206,8 +208,8 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 
 	}
 	fmt.Println("Processed vote extensions :", curseWordMap)
-	// TODO Sort the map by value and take only the once with majority
-	majority := len(app.valAddrToPubKeyMap) / 2 // We define the majority to be at least half of the validators
+	majority := len(app.valAddrToPubKeyMap) / 2 // We define the majority to be at least half of the validators;
+	// has to be at least 1/3
 
 	voteExtensionCurseWords := ""
 	for word, count := range curseWordMap {
