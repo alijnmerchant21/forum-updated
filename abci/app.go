@@ -165,7 +165,7 @@ func (app ForumApp) InitChain(_ context.Context, req *abci.RequestInitChain) (*a
 	for _, v := range req.Validators {
 		app.updateValidator(v)
 	}
-	CurseWords := []string{"fuck", "shit", "asshole", "bitch"}
+	CurseWords := []string{"bad", "rain", "cry", "never"}
 	for _, curseWord := range CurseWords {
 		err := app.DB.AddCurseWords(curseWord)
 		if err != nil {
@@ -182,23 +182,13 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	voteExtensions := proposal.LocalLastCommit.Votes
 	curseWordMap := make(map[string]int)
 	for _, vote := range voteExtensions {
-		// TODO verify the extension signature
-		if _, ok := app.valAddrToPubKeyMap[string(vote.GetValidator().Address)]; !ok {
-			// We do not have this validator, should be an error too
-			continue
-		}
 
 		// This code gets the curse words and makes sure that we do not add them more than once
 		// Thus ensuring each validator only adds one word once
 
-		tmpCurseWordMap := make(map[string]struct{})
 		curseWords := strings.Split(string(vote.GetVoteExtension()), "|")
-
-		// TODO This should be moved to verify vote extension so we don't do it here
+		fmt.Println(string(vote.GetVoteExtension()))
 		for _, word := range curseWords {
-			tmpCurseWordMap[word] = struct{}{}
-		}
-		for word := range tmpCurseWordMap {
 			if count, ok := curseWordMap[word]; !ok {
 				curseWordMap[word] = 1
 			} else {
@@ -208,13 +198,16 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 
 	}
 	fmt.Println("Processed vote extensions :", curseWordMap)
-	majority := len(app.valAddrToPubKeyMap) / 2 // We define the majority to be at least half of the validators;
-	// has to be at least 1/3
+	majority := len(app.valAddrToPubKeyMap) / 3 // We define the majority to be at least 1/3 of the validators;
 
 	voteExtensionCurseWords := ""
 	for word, count := range curseWordMap {
 		if count > majority {
-			voteExtensionCurseWords = voteExtensionCurseWords + "|" + word
+			if voteExtensionCurseWords == "" {
+				voteExtensionCurseWords = word
+			} else {
+				voteExtensionCurseWords = voteExtensionCurseWords + "|" + word
+			}
 		}
 	}
 
@@ -226,13 +219,11 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	for _, tx := range proposal.Txs {
 		msg, err := model.ParseMessage(tx)
 		if err == nil {
-			curseWords, err := app.DB.GetCurseWords()
-
 			if err != nil {
 				proposedTxs = append(proposedTxs, tx)
 			}
 			// Adding the curse words from vote extensions too
-			if !model.IsCurseWord(msg.Message, curseWords+voteExtensionCurseWords) {
+			if !model.IsCurseWord(msg.Message, voteExtensionCurseWords) {
 				proposedTxs = append(proposedTxs, tx)
 			} else {
 				banTx := model.BanTx{UserName: msg.Sender}
@@ -432,7 +423,16 @@ func (app ForumApp) VerifyVoteExtension(_ context.Context, req *abci.RequestVeri
 		// we do not have a validator with this address mapped
 		return &abci.ResponseVerifyVoteExtension{Status: abci.ResponseVerifyVoteExtension_REJECT}, nil
 	}
-
+	curseWords := strings.Split(string(req.VoteExtension), "|")
+	tmpCurseWordMap := make(map[string]struct{})
+	// Verify that we do not have double words and the validator is not trying to cheat us
+	for _, word := range curseWords {
+		tmpCurseWordMap[word] = struct{}{}
+	}
+	if len(tmpCurseWordMap) < len(curseWords) {
+		// Extension repeats words
+		return &abci.ResponseVerifyVoteExtension{Status: abci.ResponseVerifyVoteExtension_REJECT}, nil
+	}
 	return &abci.ResponseVerifyVoteExtension{Status: abci.ResponseVerifyVoteExtension_ACCEPT}, nil
 }
 

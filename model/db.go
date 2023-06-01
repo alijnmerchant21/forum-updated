@@ -197,7 +197,11 @@ func (db *DB) AddCurseWords(words string) error {
 		curseWordMap[words] = struct{}{}
 		curseWords := ""
 		for word := range curseWordMap {
-			curseWords = curseWords + "|" + word
+			if curseWords == "" {
+				curseWords = word
+			} else {
+				curseWords = curseWords + "|" + word
+			}
 		}
 		err = db.db.Update(func(txn *badger.Txn) error {
 			return txn.Set([]byte("curses"), []byte(curseWords))
