@@ -165,6 +165,13 @@ func (app ForumApp) InitChain(_ context.Context, req *abci.RequestInitChain) (*a
 	for _, v := range req.Validators {
 		app.updateValidator(v)
 	}
+	CurseWords := []string{"fuck", "shit", "asshole", "bitch"}
+	for _, curseWord := range CurseWords {
+		err := app.DB.AddCurseWords(curseWord)
+		if err != nil {
+			return &abci.ResponseInitChain{}, err
+		}
+	}
 	return &abci.ResponseInitChain{}, nil
 }
 
@@ -179,7 +186,11 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	for _, tx := range proposal.Txs {
 		msg, err := model.ParseMessage(tx)
 		if err == nil {
-			if !model.IsCurseWord(msg.Message) {
+			curseWords, err := app.DB.GetCurseWords()
+			if err != nil {
+				proposedTxs = append(proposedTxs, tx)
+			}
+			if !model.IsCurseWord(msg.Message, curseWords) {
 				proposedTxs = append(proposedTxs, tx)
 			} else {
 				banTx := model.BanTx{UserName: msg.Sender}

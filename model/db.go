@@ -178,3 +178,39 @@ func (db *DB) GetValidators(validators []types.ValidatorUpdate) error {
 func isValidatorTx(tx []byte) bool {
 	return strings.HasPrefix(string(tx), "val")
 }
+
+func (db *DB) AddCurseWords(words string) error {
+	existingWords, err := ViewDB(db.db, []byte("curses"))
+	if err != nil && err != badger.ErrKeyNotFound {
+		return err
+	}
+	if existingWords == nil {
+		err = db.db.Update(func(txn *badger.Txn) error {
+			return txn.Set([]byte("curses"), []byte(words))
+		})
+	} else {
+		existingString := strings.Split(string(existingWords), "|")
+		curseWordMap := make(map[string]struct{}, len(existingString))
+		for _, word := range existingString {
+			curseWordMap[word] = struct{}{}
+		}
+		curseWordMap[words] = struct{}{}
+		curseWords := ""
+		for word := range curseWordMap {
+			curseWords = curseWords + "|" + word
+		}
+		err = db.db.Update(func(txn *badger.Txn) error {
+			return txn.Set([]byte("curses"), []byte(curseWords))
+		})
+	}
+	return err
+}
+
+func (db *DB) GetCurseWords() (words string, err error) {
+	existingWords, err := ViewDB(db.db, []byte("curses"))
+	if err != nil && err != badger.ErrKeyNotFound {
+		return
+	}
+	words = string(existingWords)
+	return
+}
