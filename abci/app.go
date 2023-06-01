@@ -179,6 +179,34 @@ func (app ForumApp) InitChain(_ context.Context, req *abci.RequestInitChain) (*a
 func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 	fmt.Println("entered prepareProp")
 
+	voteExtensions := proposal.LocalLastCommit.Votes
+	curseWordMap := make(map[string]int)
+	for _, vote := range voteExtensions {
+		// TODO verify the extension signature
+		if _, ok := app.valAddrToPubKeyMap[string(vote.GetValidator().Address)]; !ok {
+			// We do not have this validator, should be an error too
+			continue
+		}
+
+		// This code gets the curse words and makes sure that we do not add them more than once
+		// Thus ensuring each validator only adds one word once
+		tmpCurseWordMap := make(map[string]struct{})
+		curseWords := strings.Split(string(vote.GetVoteExtension()), "|")
+
+		for _, word := range curseWords {
+			tmpCurseWordMap[word] = struct{}{}
+		}
+		for word := range tmpCurseWordMap {
+			if count, ok := curseWordMap[word]; !ok {
+				curseWordMap[word] = 1
+			} else {
+				curseWordMap[word] = count + 1
+			}
+		}
+
+	}
+
+	fmt.Println("Processed vote extensions :", curseWordMap)
 	// prepare proposal puts the BanTx first, then adds the other transactions
 	// ProcessProposal should verify this
 	proposedTxs := make([][]byte, 0)
