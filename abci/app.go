@@ -250,10 +250,11 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 	app.stagedBanTxs = make([][]byte, 0)
 	app.stagedTxs = make([][]byte, 0)
 	respTxs := make([]*types.ExecTxResult, len(req.Txs))
+	processedBanTxs := false
 	for i, tx := range req.Txs {
 		var err error
 		//Check if it's a banning transaction
-		if isBanTx(tx) {
+		if !processedBanTxs && isBanTx(tx) {
 			banTx := new(model.BanTx)
 			err = json.Unmarshal(tx, &banTx)
 			if err != nil {
@@ -265,6 +266,8 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			}
 
 		} else {
+			// There should never be a ban transaction after other txs
+			processedBanTxs = true
 			_, err := model.ParseMessage(tx)
 			if err != nil {
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
