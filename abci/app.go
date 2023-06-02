@@ -226,11 +226,11 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 	// Iterate over Tx in current block
 	app.onGoingBlock = app.state.DB.GetDB().NewTransaction(true)
 	respTxs := make([]*types.ExecTxResult, len(req.Txs))
-	processedBanTxs := false
+	finishedBanTxIdx := len(req.Txs)
 	for i, tx := range req.Txs {
 		var err error
-		//Check if it's a banning transaction
-		if !processedBanTxs && isBanTx(tx) {
+
+		if isBanTx(tx) {
 			banTx := new(model.BanTx)
 			err = json.Unmarshal(tx, &banTx)
 			if err != nil {
@@ -242,39 +242,40 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 				}
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeOK}
 				app.state.Size++
-				// app.stagedBanTxs = append(app.stagedBanTxs, tx)
 			}
-
 		} else {
-			// There should never be a ban transaction after other txs
-			processedBanTxs = true
-			msg, err := model.ParseMessage(tx)
-			if err != nil {
-				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
-			} else {
-				// Check if this sender already existed; if not, add the user too
-				err := UpdateOrSetUser(app.state.DB, msg.Sender, false, app.onGoingBlock)
-				if err != nil {
-					panic(err)
-				}
-				// Add the message for this sender
-				message, err := model.AppendToExistingMsgs(app.state.DB, *msg)
-				if err != nil {
-					return nil, err
-				}
-				app.onGoingBlock.Set([]byte(msg.Sender+"msg"), []byte(message))
-				chatHistory, err := model.AppendToChat(app.state.DB, *msg)
-				if err != nil {
-					panic(err)
-				}
-				// Append messages to chat history
-				app.onGoingBlock.Set([]byte("history"), []byte(chatHistory))
-				// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
-				respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
-				app.state.Size++
-			}
+			finishedBanTxIdx = i
+			break
 		}
+	}
 
+	for idx, tx := range req.Txs[finishedBanTxIdx:] {
+		msg, err := model.ParseMessage(tx)
+		i := idx + finishedBanTxIdx
+		if err != nil {
+			respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
+		} else {
+			// Check if this sender already existed; if not, add the user too
+			err := UpdateOrSetUser(app.state.DB, msg.Sender, false, app.onGoingBlock)
+			if err != nil {
+				panic(err)
+			}
+			// Add the message for this sender
+			message, err := model.AppendToExistingMsgs(app.state.DB, *msg)
+			if err != nil {
+				return nil, err
+			}
+			app.onGoingBlock.Set([]byte(msg.Sender+"msg"), []byte(message))
+			chatHistory, err := model.AppendToChat(app.state.DB, *msg)
+			if err != nil {
+				panic(err)
+			}
+			// Append messages to chat history
+			app.onGoingBlock.Set([]byte("history"), []byte(chatHistory))
+			// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
+			respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
+			app.state.Size++
+		}
 	}
 	app.state.Height = req.Height
 
