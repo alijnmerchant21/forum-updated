@@ -346,9 +346,7 @@ func (app *ForumApp) getWordsFromVe(voteExtensions []abci.ExtendedVoteInfo) stri
 
 		// This code gets the curse words and makes sure that we do not add them more than once
 		// Thus ensuring each validator only adds one word once
-		voteExtensionString := string(vote.GetVoteExtension())
-		voteExtensionString = DedupWords(voteExtensionString)
-		curseWords := strings.Split(voteExtensionString, "|")
+		curseWords := strings.Split(string(vote.GetVoteExtension()), "|")
 
 		for _, word := range curseWords {
 			if count, ok := curseWordMap[word]; !ok {
