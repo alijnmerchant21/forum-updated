@@ -83,3 +83,19 @@ func UpdateOrSetUser(db *model.DB, uname string, toBan bool, txn *badger.Txn) er
 	return txn.Set([]byte(uname), userBytes)
 
 }
+
+func DedupWords(inWords string) string {
+	curseWordMap := make(map[string]struct{})
+	for _, word := range strings.Split(inWords, "|") {
+		curseWordMap[word] = struct{}{}
+	}
+	deduplicatedWords := ""
+	for word := range curseWordMap {
+		if deduplicatedWords == "" {
+			deduplicatedWords = word
+		} else {
+			deduplicatedWords = deduplicatedWords + "|" + word
+		}
+	}
+	return deduplicatedWords
+}
