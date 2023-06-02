@@ -90,13 +90,8 @@ func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.
 	if sender == "history" {
 		messages, err := model.FetchHistory(app.state.DB)
 		if err != nil {
-			fmt.Println("Error fetching history")
 			return nil, err
 		}
-		if err != nil {
-			fmt.Println("error unmarshalling when fetching:", err)
-		}
-
 		resp.Log = messages
 		resp.Value = []byte(messages)
 
