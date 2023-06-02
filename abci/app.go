@@ -211,6 +211,9 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 	}
 
 	for _, tx := range processproposal.Txs[finishedBanTxIdx:] {
+		// From this point on, there should be no BanTxs anymore
+		// If there is one, ParseMessage will return an error as the
+		// format of the two transactions is different.
 		msg, err := model.ParseMessage(tx)
 		if err != nil {
 			return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, nil
@@ -252,6 +255,9 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 	}
 
 	for idx, tx := range req.Txs[finishedBanTxIdx:] {
+		// From this point on, there should be no BanTxs anymore
+		// If there is one, ParseMessage will return an error as the
+		// format of the two transactions is different.
 		msg, err := model.ParseMessage(tx)
 		i := idx + finishedBanTxIdx
 		if err != nil {
