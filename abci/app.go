@@ -2,7 +2,6 @@ package forum
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,6 +51,7 @@ func NewForumApp(dbDir string, appConfigPath string) (*ForumApp, error) {
 // Return application info
 func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.ResponseInfo, error) {
 
+	//Reading the validators from the DB because CometBFT expects the application to have them in memory
 	if len(app.valAddrToPubKeyMap) == 0 && app.state.Height > 0 {
 		validators := app.getValidators()
 		for _, v := range validators {
@@ -74,16 +74,7 @@ func (app ForumApp) Info(_ context.Context, info *abci.RequestInfo) (*abci.Respo
 // Query blockchain
 func (app ForumApp) Query(ctx context.Context, query *abci.RequestQuery) (*abci.ResponseQuery, error) {
 	resp := abci.ResponseQuery{Key: query.Data}
-	// Just testing whether validators are properly stored
-	if query.Path == "/val" {
-		for k := range app.valAddrToPubKeyMap {
-			return &types.ResponseQuery{
-				Key:   query.Data,
-				Value: []byte(string(k)),
-			}, nil
-		}
-		return &types.ResponseQuery{}, nil
-	}
+
 	// Parse sender from query data
 	sender := string(query.Data)
 
@@ -146,8 +137,9 @@ func (app ForumApp) InitChain(_ context.Context, req *abci.RequestInitChain) (*a
 	for _, v := range req.Validators {
 		app.updateValidator(v)
 	}
-	appHash := make([]byte, 8)
-	binary.PutVarint(appHash, app.state.Size)
+	appHash := app.state.Hash()
+
+	// This parameter can also be set in the genesis file
 	req.ConsensusParams.Abci.VoteExtensionsEnableHeight = 1
 	return &abci.ResponseInitChain{ConsensusParams: req.ConsensusParams, AppHash: appHash}, nil
 }
@@ -165,26 +157,30 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	for _, tx := range proposal.Txs {
 		msg, err := model.ParseMessage(tx)
 		if err == nil {
-			if err != nil {
-				proposedTxs = append(proposedTxs, tx)
-			}
-			// Adding the curse words from vote extensions too
-			if !IsCurseWord(msg.Message, voteExtensionCurseWords) {
-				proposedTxs = append(proposedTxs, tx)
+			proposedTxs = append(proposedTxs, tx)
+		}
+		// Adding the curse words from vote extensions too
+		if !IsCurseWord(msg.Message, voteExtensionCurseWords) {
+			proposedTxs = append(proposedTxs, tx)
+		} else {
+			banTx := model.BanTx{UserName: msg.Sender}
+			bannedUsersString[msg.Sender] = struct{}{}
+			resultBytes, err := json.Marshal(banTx)
+			if err == nil {
+				finalProposal = append(finalProposal, resultBytes)
 			} else {
-				banTx := model.BanTx{UserName: msg.Sender}
-				bannedUsersString[msg.Message] = struct{}{}
-				resultBytes, err := json.Marshal(banTx)
-				if err == nil {
-					finalProposal = append(finalProposal, resultBytes)
-				}
+				panic(fmt.Errorf("invalid ban transaction in prepareProposal"))
 			}
 		}
 	}
+
 	// Need to loop again through the proposed Txs to make sure there is none left by a user that was banned after the tx was accepted
 	for _, tx := range proposedTxs {
 		// there should be no error here as these are just transactions we have checked and added
-		msg, _ := model.ParseMessage(tx)
+		msg, err := model.ParseMessage(tx)
+		if err != nil {
+			panic(err)
+		}
 		if _, ok := bannedUsersString[msg.Sender]; !ok {
 			finalProposal = append(finalProposal, tx)
 		}
@@ -194,33 +190,31 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 
 func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
 	fmt.Println("entered processProp")
-	processedBanTxs := false
 	bannedUsers := make(map[string]struct{}, 0)
-	for _, tx := range processproposal.Txs {
-		var parsedBan model.BanTx
-		var parsedTx model.Message
-		var err error
-		if !processedBanTxs && isBanTx(tx) {
-			fmt.Println("FoundBanTx")
-			err = json.Unmarshal(tx, &parsedBan)
+
+	finishedBanTxIdx := len(processproposal.Txs)
+	for i, tx := range processproposal.Txs {
+		if isBanTx(tx) {
+			var parsedBan model.BanTx
+			err := json.Unmarshal(tx, &parsedBan)
 			if err != nil {
-				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
-			}
-			if processedBanTxs {
-				// Banning transactions have to come first, cannot have them once we hit the first non user ban tx
-				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
+				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, nil
 			}
 			bannedUsers[parsedBan.UserName] = struct{}{}
 		} else {
-			_, err = model.ParseMessage(tx)
-			if err != nil {
-				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
-			}
-			processedBanTxs = true
-			if _, ok := bannedUsers[parsedTx.Sender]; ok {
-				// sending us a tx from a banned user
-				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, err
-			}
+			finishedBanTxIdx = i
+			break
+		}
+	}
+
+	for _, tx := range processproposal.Txs[finishedBanTxIdx:] {
+		msg, err := model.ParseMessage(tx)
+		if err != nil {
+			return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, nil
+		}
+		if _, ok := bannedUsers[msg.Sender]; ok {
+			// sending us a tx from a banned user
+			return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, nil
 		}
 	}
 	return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_ACCEPT}, nil

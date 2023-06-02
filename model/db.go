@@ -145,7 +145,9 @@ func (db *DB) GetValidators() (validators []types.ValidatorUpdate, err error) {
 				err := item.Value(func(v []byte) error {
 					validator := new(types.ValidatorUpdate)
 					err = types.ReadMessage(bytes.NewBuffer(v), validator)
-					validators = append(validators, *validator)
+					if err == nil {
+						validators = append(validators, *validator)
+					}
 					return err
 				})
 				if err != nil {
