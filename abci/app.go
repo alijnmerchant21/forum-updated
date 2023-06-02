@@ -159,8 +159,8 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 	bannedUsersString := make(map[string]struct{})
 	for _, tx := range proposal.Txs {
 		msg, err := model.ParseMessage(tx)
-		if err == nil {
-			proposedTxs = append(proposedTxs, tx)
+		if err != nil {
+			continue
 		}
 		// Adding the curse words from vote extensions too
 		if !IsCurseWord(msg.Message, voteExtensionCurseWords) {
