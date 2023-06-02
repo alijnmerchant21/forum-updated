@@ -73,10 +73,7 @@ func (db *DB) CreateUser(user *User) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (db *DB) FindUserByName(name string) (*User, error) {
@@ -93,7 +90,7 @@ func (db *DB) FindUserByName(name string) (*User, error) {
 		return err
 	})
 	if err != nil {
-		fmt.Println("Error in retrieveing user: ", err)
+		fmt.Println("Error in retrieving user: ", err)
 		return nil, err
 	}
 
@@ -117,10 +114,7 @@ func ViewDB(db *badger.DB, key []byte) ([]byte, error) {
 			return nil
 		}
 		value, err = item.ValueCopy(nil)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err

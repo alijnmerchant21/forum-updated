@@ -120,21 +120,21 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 	msg, err := model.ParseMessage(checktx.Tx)
 	if err != nil {
 		fmt.Printf("failed to parse transaction message checktx: %v\n", err)
-		return &abci.ResponseCheckTx{Code: CodeTypeInvalidTxFormat, Log: "Invalid transaction format"}, err
+		return &abci.ResponseCheckTx{Code: CodeTypeInvalidTxFormat, Log: "Invalid transaction format"}, nil
 	}
 	fmt.Println("Searching for sender ... ", msg.Sender)
 	u, err := app.state.DB.FindUserByName(msg.Sender)
 
-	if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-		fmt.Println("problem in check tx: ", string(checktx.Tx))
-		return &types.ResponseCheckTx{Code: CodeTypeEncodingError}, nil
-	}
-
-	if err == badger.ErrKeyNotFound {
+	if err != nil {
+		if !errors.Is(err, badger.ErrKeyNotFound) {
+			fmt.Println("problem in check tx: ", string(checktx.Tx))
+			return &types.ResponseCheckTx{Code: CodeTypeEncodingError}, nil
+		}
 		fmt.Println("Not found user :", msg.Sender)
-	}
-	if u != nil && u.Banned {
-		return &types.ResponseCheckTx{Code: CodeTypeBanned, Log: "User is banned"}, nil
+	} else {
+		if u != nil && u.Banned {
+			return &types.ResponseCheckTx{Code: CodeTypeBanned, Log: "User is banned"}, nil
+		}
 	}
 	fmt.Println("Check tx success for ", msg.Message, " and ", msg.Sender)
 	return &types.ResponseCheckTx{Code: CodeTypeOK}, nil
