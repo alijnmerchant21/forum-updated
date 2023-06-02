@@ -241,7 +241,6 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 					panic(err)
 				}
 				respTxs[i] = &types.ExecTxResult{Code: CodeTypeOK}
-				app.state.Size++
 			}
 		} else {
 			finishedBanTxIdx = i
@@ -263,7 +262,7 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			// Add the message for this sender
 			message, err := model.AppendToExistingMsgs(app.state.DB, *msg)
 			if err != nil {
-				return nil, err
+				panic(err)
 			}
 			app.onGoingBlock.Set([]byte(msg.Sender+"msg"), []byte(message))
 			chatHistory, err := model.AppendToChat(app.state.DB, *msg)
