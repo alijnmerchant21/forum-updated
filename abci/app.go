@@ -172,7 +172,7 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 			if err == nil {
 				finalProposal = append(finalProposal, resultBytes)
 			} else {
-				panic(fmt.Errorf("invalid ban transaction in prepareProposal"))
+				panic(fmt.Errorf("ban transaction failed to marshal in prepareProposal"))
 			}
 		}
 	}
