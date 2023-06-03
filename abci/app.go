@@ -9,7 +9,6 @@ import (
 
 	"github.com/alijnmerchant21/forum-updated/model"
 
-	"github.com/cometbft/cometbft/abci/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cryptoencoding "github.com/cometbft/cometbft/crypto/encoding"
 	cryptoproto "github.com/cometbft/cometbft/proto/tendermint/crypto"
@@ -122,16 +121,16 @@ func (app ForumApp) CheckTx(ctx context.Context, checktx *abci.RequestCheckTx) (
 	if err != nil {
 		if !errors.Is(err, badger.ErrKeyNotFound) {
 			fmt.Println("problem in check tx: ", string(checktx.Tx))
-			return &types.ResponseCheckTx{Code: CodeTypeEncodingError}, nil
+			return &abci.ResponseCheckTx{Code: CodeTypeEncodingError}, nil
 		}
 		fmt.Println("Not found user :", msg.Sender)
 	} else {
 		if u != nil && u.Banned {
-			return &types.ResponseCheckTx{Code: CodeTypeBanned, Log: "User is banned"}, nil
+			return &abci.ResponseCheckTx{Code: CodeTypeBanned, Log: "User is banned"}, nil
 		}
 	}
 	fmt.Println("Check tx success for ", msg.Message, " and ", msg.Sender)
-	return &types.ResponseCheckTx{Code: CodeTypeOK}, nil
+	return &abci.ResponseCheckTx{Code: CodeTypeOK}, nil
 }
 
 // Consensus Connection
@@ -188,7 +187,7 @@ func (app *ForumApp) PrepareProposal(_ context.Context, proposal *abci.RequestPr
 			finalProposal = append(finalProposal, tx)
 		}
 	}
-	return &types.ResponsePrepareProposal{Txs: finalProposal}, nil
+	return &abci.ResponsePrepareProposal{Txs: finalProposal}, nil
 }
 
 func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
@@ -201,7 +200,7 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 			var parsedBan model.BanTx
 			err := json.Unmarshal(tx, &parsedBan)
 			if err != nil {
-				return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, nil
+				return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 			}
 			bannedUsers[parsedBan.UserName] = struct{}{}
 		} else {
@@ -216,14 +215,14 @@ func (ForumApp) ProcessProposal(_ context.Context, processproposal *abci.Request
 		// format of the two transactions is different.
 		msg, err := model.ParseMessage(tx)
 		if err != nil {
-			return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, nil
+			return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 		}
 		if _, ok := bannedUsers[msg.Sender]; ok {
 			// sending us a tx from a banned user
-			return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_REJECT}, nil
+			return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 		}
 	}
-	return &types.ResponseProcessProposal{Status: types.ResponseProcessProposal_ACCEPT}, nil
+	return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil
 }
 
 // Deliver the decided block with its txs to the Application
@@ -231,7 +230,7 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 	fmt.Println("entered finalizeBlock")
 	// Iterate over Tx in current block
 	app.onGoingBlock = app.state.DB.GetDB().NewTransaction(true)
-	respTxs := make([]*types.ExecTxResult, len(req.Txs))
+	respTxs := make([]*abci.ExecTxResult, len(req.Txs))
 	finishedBanTxIdx := len(req.Txs)
 	for i, tx := range req.Txs {
 		var err error
@@ -240,13 +239,13 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			banTx := new(model.BanTx)
 			err = json.Unmarshal(tx, &banTx)
 			if err != nil {
-				respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
+				respTxs[i] = &abci.ExecTxResult{Code: CodeTypeEncodingError}
 			} else {
 				err := UpdateOrSetUser(app.state.DB, banTx.UserName, true, app.onGoingBlock)
 				if err != nil {
 					panic(err)
 				}
-				respTxs[i] = &types.ExecTxResult{Code: CodeTypeOK}
+				respTxs[i] = &abci.ExecTxResult{Code: CodeTypeOK}
 			}
 		} else {
 			finishedBanTxIdx = i
@@ -261,7 +260,7 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 		msg, err := model.ParseMessage(tx)
 		i := idx + finishedBanTxIdx
 		if err != nil {
-			respTxs[i] = &types.ExecTxResult{Code: CodeTypeEncodingError}
+			respTxs[i] = &abci.ExecTxResult{Code: CodeTypeEncodingError}
 		} else {
 			// Check if this sender already existed; if not, add the user too
 			err := UpdateOrSetUser(app.state.DB, msg.Sender, false, app.onGoingBlock)
@@ -281,7 +280,7 @@ func (app *ForumApp) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeB
 			// Append messages to chat history
 			app.onGoingBlock.Set([]byte("history"), []byte(chatHistory))
 			// This adds the user to the DB, but the data is not committed nor persisted until Comit is called
-			respTxs[i] = &types.ExecTxResult{Code: abci.CodeTypeOK}
+			respTxs[i] = &abci.ExecTxResult{Code: abci.CodeTypeOK}
 			app.state.Size++
 		}
 	}
