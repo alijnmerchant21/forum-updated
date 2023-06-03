@@ -15,7 +15,7 @@ type Config struct {
 func LoadConfig(file string) (*Config, error) {
 	cfg := &Config{
 		ChainID:    "forum_chain",
-		CurseWords: "bad|apple",
+		CurseWords: "bad|apple|muggles",
 	}
 	_, err := toml.DecodeFile(file, &cfg)
 	if err != nil {
