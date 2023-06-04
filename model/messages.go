@@ -55,7 +55,7 @@ func AppendToExistingMsgs(db *DB, message Message) (string, error) {
 	if err == badger.ErrKeyNotFound {
 		return message.Message, nil
 	}
-	return existingMessages + ";" + existingMessages, nil
+	return existingMessages + ";" + message.Message, nil
 }
 
 // GetMessagesBySender retrieves all messages sent by a specific sender
