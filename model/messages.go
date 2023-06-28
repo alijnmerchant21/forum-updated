@@ -8,33 +8,54 @@ import (
 	"github.com/pkg/errors"
 )
 
+type BanTx struct {
+	UserName string `json:"username"`
+}
+
 // Message represents a message sent by a user
 type Message struct {
 	Sender  string `json:"sender"`
 	Message string `json:"message"`
 }
 
-// AddMessage adds a message to the database
-// AddMessage uses string
-// To be changed to array later
-func AddMessage(db *DB, message Message) error {
-	// Get the existing messages for the sender
+type MsgHistory struct {
+	Msg string `json:"history"`
+}
+
+func AppendToChat(db *DB, message Message) (string, error) {
+	historyBytes, err := ViewDB(db.GetDB(), []byte("history"))
+	if err != nil {
+		fmt.Println("Error fething history:", err)
+		return "", err
+	}
+	msgBytes := string(historyBytes)
+	msgBytes = msgBytes + "{sender:" + message.Sender + ",message:" + message.Message + "}"
+	return msgBytes, nil
+}
+
+func FetchHistory(db *DB) (string, error) {
+	historyBytes, err := ViewDB(db.GetDB(), []byte("history"))
+	if err != nil {
+		fmt.Println("Error fething history:", err)
+		return "", err
+	}
+	msgHistory := string(historyBytes)
+
+	if err != nil {
+		fmt.Println("erro appending history: ", err)
+	}
+	return msgHistory, err
+}
+
+func AppendToExistingMsgs(db *DB, message Message) (string, error) {
 	existingMessages, err := GetMessagesBySender(db, message.Sender)
 	if err != nil && err != badger.ErrKeyNotFound {
-		return err
+		return "", err
 	}
-
-	// Append the new message to the string
-	existingMessages += message.Message + "\n"
-
-	// Store the updated string in the Badger database
-	err = db.db.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(message.Sender), []byte(existingMessages))
-	})
-	if err != nil {
-		return err
+	if err == badger.ErrKeyNotFound {
+		return message.Message, nil
 	}
-	return nil
+	return existingMessages + ";" + message.Message, nil
 }
 
 // GetMessagesBySender retrieves all messages sent by a specific sender
@@ -42,7 +63,7 @@ func AddMessage(db *DB, message Message) error {
 func GetMessagesBySender(db *DB, sender string) (string, error) {
 	var messages string
 	err := db.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(sender))
+		item, err := txn.Get([]byte(sender + "msg"))
 		if err != nil {
 			return err
 		}

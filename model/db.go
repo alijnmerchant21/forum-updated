@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/cometbft/cometbft/abci/types"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/pkg/errors"
 )
@@ -24,6 +26,7 @@ func (db *DB) Commit() error {
 }
 
 func NewDB(dbPath string) (*DB, error) {
+	fmt.Println("New DB")
 	// Open badger DB
 	opts := badger.DefaultOptions(dbPath)
 	db, err := badger.Open(opts)
@@ -70,44 +73,28 @@ func (db *DB) CreateUser(user *User) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (db *DB) FindUserByName(name string) (*User, error) {
 	// Read the user from the database
-	var user User
+	var user *User
 	err := db.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(name))
 		if err != nil {
 			return err
 		}
 		err = item.Value(func(val []byte) error {
-			// Currently, the code fails because the message is appended to value.
-			// Example value returns something like: {"Name":"Harry","PubKey":"5oTd/trVFVTTExUV83Hp3Uwf43g9lR8Qk+UmEXqMENo=","Moderator":false,"Banned":true,"NumMessages":0,"Version":0,"SchemaVersion":0}HelloWorld.
-			// Message appended after value causes the func to break as it expects '}' in the end.
-			// Bandage fix: Just remove any data after '}'
-			// String is causing this issue maybe. Once we switch back to array this should be fixed.
-			end := bytes.IndexByte(val, '}') + 1
-			if end <= 0 || end > len(val) {
-				return fmt.Errorf("invalid JSON data")
-			}
-			val = val[:end]
 			return json.Unmarshal(val, &user)
 		})
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	if err != nil {
+		fmt.Println("Error in retrieving user: ", err)
 		return nil, err
 	}
 
-	return &user, nil
+	return user, nil
 }
 
 func (db *DB) Set(key, value []byte) error {
@@ -127,10 +114,7 @@ func ViewDB(db *badger.DB, key []byte) ([]byte, error) {
 			return nil
 		}
 		value, err = item.ValueCopy(nil)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -138,19 +122,43 @@ func ViewDB(db *badger.DB, key []byte) ([]byte, error) {
 	return value, nil
 }
 
-func (db *DB) UpdateUser(u User) error {
-	err := db.db.Update(func(txn *badger.Txn) error {
-		userBytes, err := json.Marshal(u)
-		if err != nil {
-			return err
-		}
-		err = txn.Set([]byte(u.Name), userBytes)
-		return err
-
-	})
-	return err
-}
-
 func (db *DB) Close() error {
 	return db.db.Close()
+}
+
+func (db *DB) Get(key []byte) ([]byte, error) {
+
+	return ViewDB(db.db, key)
+
+}
+func (db *DB) GetValidators() (validators []types.ValidatorUpdate, err error) {
+	err = db.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchSize = 10
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			var err error
+			item := it.Item()
+			k := item.Key()
+			if isValidatorTx(k) {
+				err := item.Value(func(v []byte) error {
+					validator := new(types.ValidatorUpdate)
+					err = types.ReadMessage(bytes.NewBuffer(v), validator)
+					if err == nil {
+						validators = append(validators, *validator)
+					}
+					return err
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	return
+}
+func isValidatorTx(tx []byte) bool {
+	return strings.HasPrefix(string(tx), "val")
 }

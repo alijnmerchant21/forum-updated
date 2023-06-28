@@ -13,7 +13,3 @@ type User struct {
 	Version       uint64
 	SchemaVersion int
 }
-
-func (u *User) IsBanned() bool {
-	return u.Banned
-}
